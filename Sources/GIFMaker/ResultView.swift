@@ -24,8 +24,6 @@ struct ResultView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.secondaryText)
 
-                    RainbowStripe().clipShape(Capsule())
-
                     HStack(alignment: .top, spacing: 28) {
                         Button {
                             Task { await save() }

@@ -45,9 +45,6 @@ struct HomeView: View {
                         .font(.body.weight(.semibold))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(Theme.secondaryText)
-                    RainbowStripe()
-                        .frame(width: 120)
-                        .clipShape(Capsule())
                     Spacer()
 
                     PhotosPicker(selection: $pickerItem, matching: .videos) {

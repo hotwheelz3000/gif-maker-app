@@ -79,7 +79,7 @@ struct EditorView: View {
                 .accessibilityLabel("Video preview, crop \(model.aspect.rawValue)")
                 .accessibilityHint("Use the Crop tool's buttons to zoom or move the crop.")
 
-            RainbowStripe()
+            Rectangle().fill(Theme.surface).frame(height: 1).accessibilityHidden(true)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
