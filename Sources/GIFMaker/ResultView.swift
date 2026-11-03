@@ -8,51 +8,57 @@ struct ResultView: View {
     @State private var isSaving = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                GIFPlayerView(url: result.url)
-                    .aspectRatio(result.pixelSize, contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: 420)
-                    .background(Color.black.opacity(0.05))
-                    .accessibilityElement()
-                    .accessibilityLabel("Your GIF, \(result.loopMode.rawValue) loop, \(Int(result.pixelSize.width)) by \(Int(result.pixelSize.height))")
-                    .accessibilityAddTraits(.isImage)
+        ZStack {
+            Theme.background.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 20) {
+                    GIFPlayerView(url: result.url)
+                        .aspectRatio(result.pixelSize, contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: 440)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .accessibilityElement()
+                        .accessibilityLabel("Your GIF, \(result.loopMode.rawValue) loop, \(Int(result.pixelSize.width)) by \(Int(result.pixelSize.height))")
+                        .accessibilityAddTraits(.isImage)
 
-                Text("\(result.loopMode.rawValue) · \(Int(result.pixelSize.width))×\(Int(result.pixelSize.height)) · \(result.frameCount) frames · \(ByteCountFormatter.string(fromByteCount: Int64(result.bytes), countStyle: .file))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    Text("\(result.loopMode.rawValue) · \(Int(result.pixelSize.width))×\(Int(result.pixelSize.height)) · \(result.frameCount) frames · \(ByteCountFormatter.string(fromByteCount: Int64(result.bytes), countStyle: .file))")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
 
-                Button {
-                    Task { await save() }
-                } label: {
-                    Label("Save to Photos", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
+                    RainbowStripe().clipShape(Capsule())
+
+                    HStack(alignment: .top, spacing: 28) {
+                        Button {
+                            Task { await save() }
+                        } label: {
+                            roundAction("arrow.down.to.line", title: "Save", prominent: true)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSaving)
+                        .accessibilityLabel("Save to Photos")
+
+                        ShareLink(item: result.url) {
+                            roundAction("square.and.arrow.up", title: "Share", prominent: false)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Share")
+
+                        Button {
+                            copy()
+                        } label: {
+                            roundAction("doc.on.doc", title: "Copy", prominent: false)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Copy GIF")
+                    }
+
+                    if let status {
+                        Text(status)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(isSaving)
-
-                ShareLink(item: result.url) {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-
-                Button {
-                    copy()
-                } label: {
-                    Label("Copy GIF", systemImage: "doc.on.doc")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-
-                if let status {
-                    Text(status).font(.footnote).foregroundStyle(.secondary)
-                }
+                .padding(20)
             }
-            .padding()
         }
         .onChange(of: status) { _, message in
             // VoiceOver reads out "Saved", "Copied" and errors.
@@ -60,6 +66,25 @@ struct ResultView: View {
         }
         .navigationTitle("Your GIF")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+    }
+
+    private func roundAction(_ icon: String, title: String, prominent: Bool) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 64, height: 64)
+                .background(
+                    prominent ? AnyShapeStyle(Theme.gradient) : AnyShapeStyle(Theme.surface),
+                    in: Circle()
+                )
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+        }
+        .contentShape(Rectangle())
     }
 
     private func save() async {

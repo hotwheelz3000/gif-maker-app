@@ -28,37 +28,50 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                Spacer()
-                Image(systemName: "photo.stack")
-                    .font(.system(size: 64))
-                    .foregroundStyle(.tint)
-                    .accessibilityHidden(true)
-                Text("Turn a video into a GIF")
-                    .font(.title2.bold())
-                Text("Trim it, crop it, pick a loop style, then save or share.")
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            ZStack {
+                Theme.background.ignoresSafeArea()
 
-                PhotosPicker(selection: $pickerItem, matching: .videos) {
-                    Label("Choose a Video", systemImage: "photo.on.rectangle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                VStack(spacing: 18) {
+                    Spacer()
+                    Image(systemName: "sparkles.rectangle.stack.fill")
+                        .font(.system(size: 72))
+                        .foregroundStyle(Theme.rainbow)
+                        .accessibilityHidden(true)
+                    Text("GIF Maker")
+                        .font(.system(size: 44, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.white)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Turn any video into a GIF.\nTrim it, crop it, loop it.")
+                        .font(.body.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(Theme.secondaryText)
+                    RainbowStripe()
+                        .frame(width: 120)
+                        .clipShape(Capsule())
+                    Spacer()
 
-                if let errorMessage {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                    PhotosPicker(selection: $pickerItem, matching: .videos) {
+                        Label("Choose a Video", systemImage: "photo.on.rectangle.angled")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PillButtonStyle())
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color(red: 1, green: 0.45, blue: 0.45))
+                    }
                 }
+                .padding(24)
             }
-            .padding()
-            .navigationTitle("GIF Maker")
+            .navigationTitle("")
+            .toolbarBackground(Theme.background, for: .navigationBar)
             .overlay {
                 if isLoading {
                     ProgressView("Loading video...")
-                        .padding()
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .tint(.white)
+                        .padding(24)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20))
                 }
             }
             .onChange(of: pickerItem) { _, item in
@@ -69,6 +82,7 @@ struct HomeView: View {
                 EditorView(url: url)
             }
         }
+        .tint(.white)
     }
 
     private func load(_ item: PhotosPickerItem) async {

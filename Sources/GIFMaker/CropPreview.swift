@@ -26,7 +26,7 @@ struct CropPreview: View {
                 .frame(width: geo.size.width, height: geo.size.height)
         }
         .frame(height: maxHeight)
-        .background(Color.black.opacity(0.9))
+        .background(Color.black)
     }
 
     private func dragGesture(scale s: CGFloat) -> some Gesture {
