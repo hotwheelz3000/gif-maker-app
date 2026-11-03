@@ -30,18 +30,37 @@ struct EditorView: View {
     private var editor: some View {
         VStack(spacing: 0) {
             CropPreview(model: model)
+                .accessibilityElement()
+                .accessibilityLabel("Video preview, crop \(model.aspect.rawValue)")
+                .accessibilityHint("Use the crop buttons below to zoom or move the crop.")
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     section("Trim") {
                         TrimBar(model: model)
                         HStack {
-                            Text("\(time(model.start)) – \(time(model.end))")
+                            Text("\(timeString(model.start)) – \(timeString(model.end))")
                             Spacer()
                             Text(String(format: "%.1fs (max %.0fs)", model.clipLength, EditorModel.maxClip))
                                 .foregroundStyle(.secondary)
                         }
                         .font(.caption.monospacedDigit())
+                        .accessibilityHidden(true)
+
+                        // Tap alternative to dragging the handles.
+                        HStack {
+                            nudgeGroup(
+                                title: "Start",
+                                minus: { model.nudgeStart(-0.1) },
+                                plus: { model.nudgeStart(0.1) }
+                            )
+                            Spacer()
+                            nudgeGroup(
+                                title: "End",
+                                minus: { model.nudgeEnd(-0.1) },
+                                plus: { model.nudgeEnd(0.1) }
+                            )
+                        }
                     }
 
                     section("Crop") {
@@ -50,13 +69,27 @@ struct EditorView: View {
                                 ForEach(CropAspect.allCases) { a in
                                     Button(a.rawValue) { model.aspect = a }
                                         .buttonStyle(.bordered)
+                                        .controlSize(.large)
                                         .tint(model.aspect == a ? .accentColor : .secondary)
+                                        .accessibilityLabel("Crop \(a.rawValue)")
+                                        .accessibilityAddTraits(model.aspect == a ? .isSelected : [])
                                 }
-                                Button("Reset") { model.resetCrop() }
-                                    .buttonStyle(.borderless)
                             }
                         }
-                        Text("Drag the video to move it. Pinch to zoom.")
+
+                        // Tap alternatives to pinch and drag.
+                        ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            iconButton("minus.magnifyingglass", label: "Zoom out") { model.zoom(by: 1 / 1.25) }
+                            iconButton("plus.magnifyingglass", label: "Zoom in") { model.zoom(by: 1.25) }
+                            iconButton("arrow.left", label: "Move crop left") { model.moveCrop(dx: -1, dy: 0) }
+                            iconButton("arrow.up", label: "Move crop up") { model.moveCrop(dx: 0, dy: -1) }
+                            iconButton("arrow.down", label: "Move crop down") { model.moveCrop(dx: 0, dy: 1) }
+                            iconButton("arrow.right", label: "Move crop right") { model.moveCrop(dx: 1, dy: 0) }
+                            iconButton("arrow.counterclockwise", label: "Reset crop") { model.resetCrop() }
+                        }
+                        }
+                        Text("Drag the video to move it, pinch to zoom, or use these buttons.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -91,7 +124,7 @@ struct EditorView: View {
                     }
 
                     section("Frame rate") {
-                        Picker("FPS", selection: $model.fps) {
+                        Picker("Frame rate", selection: $model.fps) {
                             Text("10 fps").tag(10)
                             Text("14 fps").tag(14)
                             Text("15 fps").tag(15)
@@ -103,6 +136,7 @@ struct EditorView: View {
                     let size = model.outputSize
                     Text("\(Int(size.width))×\(Int(size.height)) · about \(model.estimatedFrames) frames")
                         .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("Output \(Int(size.width)) by \(Int(size.height)), about \(model.estimatedFrames) frames")
 
                     if let err = model.exportError {
                         Text(err).font(.footnote).foregroundStyle(.red)
@@ -128,8 +162,11 @@ struct EditorView: View {
                     VStack(spacing: 12) {
                         ProgressView(value: model.progress)
                             .frame(width: 200)
+                            .accessibilityLabel("Making GIF")
                         Text("Making GIF... \(Int(model.progress * 100))%")
                         Button("Cancel", role: .cancel) { model.cancelExport() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
                     }
                     .padding(24)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -141,14 +178,29 @@ struct EditorView: View {
     @ViewBuilder
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
+            Text(title).font(.headline).accessibilityAddTraits(.isHeader)
             content()
         }
     }
 
-    private func time(_ s: Double) -> String {
-        let m = Int(s) / 60
-        let sec = s - Double(m * 60)
-        return String(format: "%d:%04.1f", m, sec)
+    /// "Start  [−] [+]" with 44-point buttons that move a handle by 0.1 s.
+    private func nudgeGroup(title: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Text(title).font(.subheadline).accessibilityHidden(true)
+            iconButton("minus", label: "\(title) earlier by a tenth of a second", action: minus)
+            iconButton("plus", label: "\(title) later by a tenth of a second", action: plus)
+        }
+    }
+
+    /// Icon-only button with at least a 44 × 44 point tap area and a VoiceOver label.
+    private func iconButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .frame(minWidth: 28, minHeight: 28)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityLabel(label)
     }
 }

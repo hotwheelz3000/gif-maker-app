@@ -36,6 +36,7 @@ struct HomeView: View {
                 Image(systemName: "photo.stack")
                     .font(.system(size: 64))
                     .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
                 Text("Turn a video into a GIF")
                     .font(.title2.bold())
                 Text("Trim it, crop it, pick a loop style, then save or share.")

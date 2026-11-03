@@ -14,6 +14,9 @@ struct ResultView: View {
                     .aspectRatio(result.pixelSize, contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: 420)
                     .background(Color.black.opacity(0.05))
+                    .accessibilityElement()
+                    .accessibilityLabel("Your GIF, \(result.loopMode.rawValue) loop, \(Int(result.pixelSize.width)) by \(Int(result.pixelSize.height))")
+                    .accessibilityAddTraits(.isImage)
 
                 Text("\(result.loopMode.rawValue) · \(Int(result.pixelSize.width))×\(Int(result.pixelSize.height)) · \(result.frameCount) frames · \(ByteCountFormatter.string(fromByteCount: Int64(result.bytes), countStyle: .file))")
                     .font(.caption)
@@ -50,6 +53,10 @@ struct ResultView: View {
                 }
             }
             .padding()
+        }
+        .onChange(of: status) { _, message in
+            // VoiceOver reads out "Saved", "Copied" and errors.
+            if let message { AccessibilityNotification.Announcement(message).post() }
         }
         .navigationTitle("Your GIF")
         .navigationBarTitleDisplayMode(.inline)

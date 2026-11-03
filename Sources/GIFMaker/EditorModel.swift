@@ -263,6 +263,24 @@ final class EditorModel: ObservableObject {
 
     var clipLength: Double { max(0, end - start) }
 
+    /// Slides the whole selection, keeping its length.
+    func moveSelection(start newStart: Double) {
+        let len = end - start
+        let s = min(max(0, newStart), max(0, duration - len))
+        start = s
+        end = s + len
+    }
+
+    func nudgeStart(_ delta: Double) {
+        setStart(start + delta)
+        restartLoop()
+    }
+
+    func nudgeEnd(_ delta: Double) {
+        setEnd(end + delta)
+        restartLoop()
+    }
+
     // MARK: Crop
 
     var cropRect: CGRect {
@@ -288,6 +306,19 @@ final class EditorModel: ObservableObject {
         let r = cropRect
         guard r.width > 0 else { return }
         center = CGPoint(x: r.midX, y: r.midY)
+    }
+
+    /// Tap alternative to pinching.
+    func zoom(by factor: CGFloat) {
+        zoom = min(max(zoom * factor, 1), 4)
+        normalizeCenter()
+    }
+
+    /// Tap alternative to dragging: moves the crop by a tenth of its size.
+    func moveCrop(dx: CGFloat, dy: CGFloat) {
+        let r = cropRect
+        center = CGPoint(x: r.midX + dx * r.width / 10, y: r.midY + dy * r.height / 10)
+        normalizeCenter()
     }
 
     func resetCrop() {
