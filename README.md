@@ -9,7 +9,7 @@ An iPhone app that turns videos into GIFs. Built with [xtool](https://xtool.sh) 
 - Crop to Original, 1:1, 3:2, 16:9, 4:5 or 9:16; drag to move, pinch to zoom
 - Loop style: Normal, Reverse or Boomerang
 - Speed: 0.5x, 1x, 1.5x or 2x
-- Width 320, 480 or 720 (default 720); 10, 14, 15 or 24 fps (default 14)
+- Width 320, 480 or 720 (default 720); 10, 14, 15 or 24 fps (default 15)
 - Save to Photos, share, or copy the GIF
 - Accessibility: 44-point targets, VoiceOver labels and adjustable trim handles, tap buttons for every drag or pinch, Reduce Motion respected
 

@@ -75,7 +75,7 @@ final class EditorModel: ObservableObject {
         didSet { if player.rate != 0 { player.rate = direction < 0 ? reverseRate : Float(speed) } }
     }
     @Published var width: Int = 720
-    @Published var fps: Int = 14
+    @Published var fps: Int = 15
 
     // Export
     @Published var isExporting = false

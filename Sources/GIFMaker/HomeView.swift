@@ -24,6 +24,8 @@ struct HomeView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var videoURL: URL?
     @State private var showCamera = false
+    /// Recorded video waiting for the camera screen to finish closing.
+    @State private var recordedURL: URL?
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -78,8 +80,14 @@ struct HomeView: View {
                 guard let item else { return }
                 Task { await load(item) }
             }
-            .fullScreenCover(isPresented: $showCamera) {
-                CameraPicker { url in videoURL = url }
+            .fullScreenCover(isPresented: $showCamera, onDismiss: {
+                // Open the editor only after the camera has fully closed.
+                if let url = recordedURL {
+                    recordedURL = nil
+                    videoURL = url
+                }
+            }) {
+                CameraPicker { url in recordedURL = url }
                     .ignoresSafeArea()
             }
             .navigationDestination(item: $videoURL) { url in
