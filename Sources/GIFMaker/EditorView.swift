@@ -20,7 +20,7 @@ struct EditorView: View {
         .navigationTitle("Edit")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
-        .onAppear { if model.isReady && !model.isExporting { model.seek(to: model.start, thenPlay: true) } }
+        .onAppear { if model.isReady && !model.isExporting { model.restartLoop() } }
         .onDisappear { model.pause() }
         .navigationDestination(item: $model.result) { result in
             ResultView(result: result)
@@ -65,6 +65,10 @@ struct EditorView: View {
                             ForEach(LoopMode.allCases) { Text($0.rawValue).tag($0) }
                         }
                         .pickerStyle(.segmented)
+                        if !model.previewShowsLoopMode {
+                            Text("This video can't play backwards in the preview, but the GIF will be \(model.loopMode.rawValue.lowercased()).")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
 
                     section("Speed") {

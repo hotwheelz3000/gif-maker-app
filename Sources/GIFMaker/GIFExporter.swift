@@ -46,28 +46,37 @@ enum GIFExporter {
         gen.requestedTimeToleranceBefore = tolerance
         gen.requestedTimeToleranceAfter = tolerance
 
+        // Times use a fixed 600 timescale so each result can be matched back
+        // to its slot, whatever order the generator returns them in.
         var times: [CMTime] = []
+        var slotForTime: [Int64: Int] = [:]
         var t = s.start
         while t < s.end - 0.0001 {
-            times.append(CMTime(seconds: t, preferredTimescale: 600))
+            let time = CMTime(value: Int64((t * 600).rounded()), timescale: 600)
+            if slotForTime[time.value] == nil {
+                slotForTime[time.value] = times.count
+                times.append(time)
+            }
             t += step
         }
         guard !times.isEmpty else { throw GIFExportError.noFrames }
 
-        // 1. Read frames in order; keep them as small JPEGs to save memory.
-        var frames: [Data] = []
-        frames.reserveCapacity(times.count)
+        // 1. Read frames; keep them as small JPEGs (in time order) to save memory.
+        var slots = [Data?](repeating: nil, count: times.count)
         var done = 0
         for await item in gen.images(for: times) {
             try Task.checkCancellation()
             done += 1
-            if let cg = try? item.image,
+            let key = CMTimeConvertScale(item.requestedTime, timescale: 600, method: .roundHalfAwayFromZero).value
+            if let slot = slotForTime[key],
+               let cg = try? item.image,
                let rendered = render(cg, crop: s.crop, videoSize: s.videoSize, outSize: s.outputSize),
                let jpeg = jpegData(rendered) {
-                frames.append(jpeg)
+                slots[slot] = jpeg
             }
             progress(0.7 * Double(done) / Double(times.count))
         }
+        let frames = slots.compactMap { $0 }
         guard !frames.isEmpty else { throw GIFExportError.noFrames }
 
         // 2. Put frames in loop order.
@@ -115,7 +124,7 @@ enum GIFExporter {
         guard CGImageDestinationFinalize(dest) else { throw GIFExportError.writeFailed }
 
         let bytes = (try? FileManager.default.attributesOfItem(atPath: outURL.path)[.size] as? Int) ?? 0
-        return GIFResult(url: outURL, frameCount: order.count, pixelSize: s.outputSize, bytes: bytes)
+        return GIFResult(url: outURL, frameCount: order.count, pixelSize: s.outputSize, loopMode: s.loopMode, bytes: bytes)
     }
 
     /// Crops a frame (crop is in video-pixel coordinates) and scales it to outSize.

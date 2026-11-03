@@ -15,7 +15,7 @@ struct ResultView: View {
                     .frame(maxWidth: .infinity, maxHeight: 420)
                     .background(Color.black.opacity(0.05))
 
-                Text("\(Int(result.pixelSize.width))×\(Int(result.pixelSize.height)) · \(result.frameCount) frames · \(ByteCountFormatter.string(fromByteCount: Int64(result.bytes), countStyle: .file))")
+                Text("\(result.loopMode.rawValue) · \(Int(result.pixelSize.width))×\(Int(result.pixelSize.height)) · \(result.frameCount) frames · \(ByteCountFormatter.string(fromByteCount: Int64(result.bytes), countStyle: .file))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

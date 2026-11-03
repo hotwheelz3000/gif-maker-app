@@ -36,6 +36,7 @@ struct GIFResult: Identifiable, Hashable {
     let url: URL
     let frameCount: Int
     let pixelSize: CGSize
+    let loopMode: LoopMode
     let bytes: Int
 
     static func == (a: GIFResult, b: GIFResult) -> Bool { a.id == b.id }
@@ -57,6 +58,7 @@ final class EditorModel: ObservableObject {
     @Published var videoSize: CGSize = .zero
     @Published var thumbnails: [UIImage] = []
     @Published var currentTime: Double = 0
+    @Published var canReverse = false
 
     // Trim
     @Published var start: Double = 0
@@ -68,8 +70,10 @@ final class EditorModel: ObservableObject {
     @Published var center: CGPoint = .zero
 
     // Output
-    @Published var loopMode: LoopMode = .normal
-    @Published var speed: Double = 1 { didSet { if player.rate != 0 { player.rate = Float(speed) } } }
+    @Published var loopMode: LoopMode = .normal { didSet { if isReady { restartLoop() } } }
+    @Published var speed: Double = 1 {
+        didSet { if player.rate != 0 { player.rate = direction < 0 ? reverseRate : Float(speed) } }
+    }
     @Published var width: Int = 480
     @Published var fps: Int = 15
 
@@ -79,8 +83,9 @@ final class EditorModel: ObservableObject {
     @Published var exportError: String?
     @Published var result: GIFResult?
 
-    nonisolated(unsafe) private var timeObserver: Any?
-    nonisolated(unsafe) private var endObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var timer: Timer?
+    private var direction: Float = 1
+    private var isActive = false
     private var isSeeking = false
     private var isScrubbing = false
     private var exportTask: Task<Void, Never>?
@@ -94,8 +99,7 @@ final class EditorModel: ObservableObject {
     }
 
     deinit {
-        if let timeObserver { player.removeTimeObserver(timeObserver) }
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        timer?.invalidate()
     }
 
     // MARK: Loading
@@ -138,56 +142,107 @@ final class EditorModel: ObservableObject {
         thumbnails = images
     }
 
-    // MARK: Playback (loops the trimmed range)
+    // MARK: Playback (loops the trimmed range in the chosen loop style)
 
-    private func startPlayback() {
-        timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(value: 1, timescale: 30), queue: .main
-        ) { [weak self] time in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let t = time.seconds
-                self.currentTime = t
-                guard !self.isScrubbing, !self.isSeeking else { return }
-                if t >= self.end - 0.02 || t < self.start - 0.2 {
-                    self.seek(to: self.start, thenPlay: true)
-                }
-            }
-        }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, !self.isScrubbing, !self.isExporting else { return }
-                self.seek(to: self.start, thenPlay: true)
-            }
-        }
-        seek(to: start, thenPlay: true)
+    /// True when the preview can actually play backwards for this video.
+    var previewShowsLoopMode: Bool { loopMode == .normal || canReverse }
+
+    private var reverseRate: Float {
+        guard let item = player.currentItem else { return -1 }
+        if speed > 1, item.canPlayFastReverse { return -Float(speed) }
+        if speed < 1, item.canPlaySlowReverse { return -Float(speed) }
+        return -1
     }
 
-    func seek(to seconds: Double, thenPlay: Bool) {
+    private func startPlayback() {
+        canReverse = player.currentItem?.canPlayReverse ?? false
+        // A timer (not a periodic observer) so the loop also restarts when the
+        // player has stopped at either end of the video.
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+        restartLoop()
+    }
+
+    private func tick() {
+        let t = player.currentTime().seconds
+        if t.isFinite { currentTime = t }
+        guard isActive, !isScrubbing, !isSeeking, !isExporting, t.isFinite else { return }
+        if !canReverse { canReverse = player.currentItem?.canPlayReverse ?? false }
+
+        let mode: LoopMode = canReverse ? loopMode : .normal
+        switch mode {
+        case .normal:
+            if t >= end - 0.02 || t < start - 0.2 || player.rate == 0 {
+                seek(to: start, direction: 1)
+            }
+        case .reverse:
+            if t <= start + 0.02 || t > end + 0.2 || player.rate == 0 {
+                seek(to: end, direction: -1)
+            }
+        case .boomerang:
+            if t > end + 0.2 || t < start - 0.2 {
+                seek(to: start, direction: 1)
+            } else if direction > 0 && t >= end - 0.02 {
+                direction = -1
+                player.rate = reverseRate
+            } else if direction < 0 && t <= start + 0.02 {
+                direction = 1
+                player.rate = Float(speed)
+            } else if player.rate == 0 {
+                play()
+            }
+        }
+    }
+
+    /// Starts the loop from the right end for the current loop style.
+    func restartLoop() {
+        isActive = true
+        if loopMode == .reverse && canReverse {
+            seek(to: end, direction: -1)
+        } else {
+            seek(to: start, direction: 1)
+        }
+    }
+
+    private func seek(to seconds: Double, direction newDirection: Float) {
         isSeeking = true
+        direction = newDirection
+        player.pause()
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
         Task {
             _ = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
             isSeeking = false
-            if thenPlay && !isScrubbing && !isExporting { play() }
+            if isActive && !isScrubbing && !isExporting { play() }
         }
     }
 
-    func play() { player.playImmediately(atRate: Float(speed)) }
-    func pause() { player.pause() }
+    func play() {
+        player.playImmediately(atRate: direction < 0 ? reverseRate : Float(speed))
+    }
+
+    func pause() {
+        isActive = false
+        player.pause()
+    }
 
     func scrub(to seconds: Double) {
         isScrubbing = true
         player.pause()
         guard !isSeeking else { return }
-        seek(to: seconds, thenPlay: false)
+        isSeeking = true
+        let target = CMTime(seconds: seconds, preferredTimescale: 600)
+        Task {
+            _ = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            isSeeking = false
+        }
     }
 
     func endScrub() {
         isScrubbing = false
-        seek(to: start, thenPlay: true)
+        restartLoop()
     }
 
     // MARK: Trim
@@ -266,7 +321,7 @@ final class EditorModel: ObservableObject {
         isExporting = true
         progress = 0
         exportError = nil
-        player.pause()
+        pause()
         let settings = GIFSettings(
             videoURL: url, start: start, end: end, crop: cropRect, videoSize: videoSize,
             outputSize: outputSize, fps: fps, speed: speed, loopMode: loopMode
@@ -282,6 +337,7 @@ final class EditorModel: ObservableObject {
                 self.exportError = error.localizedDescription
             }
             self.isExporting = false
+            if self.result == nil { self.restartLoop() }
         }
     }
 
