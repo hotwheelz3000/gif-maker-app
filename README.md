@@ -4,7 +4,7 @@ An iPhone app that turns videos into GIFs. Built with [xtool](https://xtool.sh) 
 
 ## Features
 
-- Choose a video from Photos, or record one with the camera
+- Choose a video from Photos
 - Trim with a thumbnail timeline (clips up to 15 seconds)
 - Crop to Original, 1:1, 3:2, 16:9, 4:5 or 9:16; drag to move, pinch to zoom
 - Loop style: Normal, Reverse or Boomerang

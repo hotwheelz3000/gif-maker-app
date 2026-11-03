@@ -4,10 +4,6 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>GIF Maker</string>
-	<key>NSCameraUsageDescription</key>
-	<string>GIF Maker uses the camera to record videos to turn into GIFs.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>The camera records video with sound. GIFs themselves are silent.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>GIF Maker opens videos from your library to turn into GIFs.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

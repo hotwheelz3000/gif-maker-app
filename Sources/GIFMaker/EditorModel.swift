@@ -334,6 +334,12 @@ final class EditorModel: ObservableObject {
         normalizeCenter()
     }
 
+    // Whether the crop has room to move in each direction (for greying out the arrows).
+    var canMoveLeft: Bool { cropRect.minX > 0.5 }
+    var canMoveRight: Bool { cropRect.maxX < videoSize.width - 0.5 }
+    var canMoveUp: Bool { cropRect.minY > 0.5 }
+    var canMoveDown: Bool { cropRect.maxY < videoSize.height - 0.5 }
+
     func resetCrop() {
         zoom = 1
         center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)

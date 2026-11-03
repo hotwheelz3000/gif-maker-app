@@ -75,18 +75,32 @@ struct EditorView: View {
                         }
 
                         // Tap alternatives to pinch and drag.
-                        ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            iconButton("minus.magnifyingglass", label: "Zoom out") { model.zoom(by: 1 / 1.25) }
-                            iconButton("plus.magnifyingglass", label: "Zoom in") { model.zoom(by: 1.25) }
-                            iconButton("arrow.left", label: "Move crop left") { model.moveCrop(dx: -1, dy: 0) }
-                            iconButton("arrow.up", label: "Move crop up") { model.moveCrop(dx: 0, dy: -1) }
-                            iconButton("arrow.down", label: "Move crop down") { model.moveCrop(dx: 0, dy: 1) }
-                            iconButton("arrow.right", label: "Move crop right") { model.moveCrop(dx: 1, dy: 0) }
-                            iconButton("arrow.counterclockwise", label: "Reset crop") { model.resetCrop() }
+                        HStack(spacing: 8) {
+                            rowLabel("Zoom")
+                            iconButton("minus", label: "Zoom out", size: .regular) { model.zoom(by: 1 / 1.25) }
+                                .disabled(model.zoom <= 1.001)
+                            iconButton("plus", label: "Zoom in", size: .regular) { model.zoom(by: 1.25) }
+                                .disabled(model.zoom >= 3.999)
+                            Button { model.resetCrop() } label: {
+                                Text("Reset").frame(minHeight: 30)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Reset crop")
+                            Spacer(minLength: 0)
                         }
+                        HStack(spacing: 8) {
+                            rowLabel("Move")
+                            iconButton("arrow.left", label: "Move crop left", size: .regular) { model.moveCrop(dx: -1, dy: 0) }
+                                .disabled(!model.canMoveLeft)
+                            iconButton("arrow.up", label: "Move crop up", size: .regular) { model.moveCrop(dx: 0, dy: -1) }
+                                .disabled(!model.canMoveUp)
+                            iconButton("arrow.down", label: "Move crop down", size: .regular) { model.moveCrop(dx: 0, dy: 1) }
+                                .disabled(!model.canMoveDown)
+                            iconButton("arrow.right", label: "Move crop right", size: .regular) { model.moveCrop(dx: 1, dy: 0) }
+                                .disabled(!model.canMoveRight)
+                            Spacer(minLength: 0)
                         }
-                        Text("Drag the video to move it, pinch to zoom, or use these buttons.")
+                        Text("Move shifts the part of the video you keep. It works once you zoom in or pick a shape that cuts off part of the video. You can also drag and pinch the video.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -188,6 +202,13 @@ struct EditorView: View {
             iconButton("plus", label: "\(title) later by a tenth of a second", size: .regular, action: plus)
             iconButton("minus", label: "\(title) earlier by a tenth of a second", size: .regular, action: minus)
         }
+    }
+
+    private func rowLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .frame(width: 52, alignment: .leading)
+            .accessibilityHidden(true)
     }
 
     /// Icon-only button with at least a 44 × 44 point tap area and a VoiceOver label.

@@ -23,13 +23,8 @@ struct Movie: Transferable {
 struct HomeView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var videoURL: URL?
-    @State private var showCamera = false
-    /// Recorded video waiting for the camera screen to finish closing.
-    @State private var recordedURL: URL?
     @State private var isLoading = false
     @State private var errorMessage: String?
-
-    private let cameraAvailable = UIImagePickerController.isSourceTypeAvailable(.camera)
 
     var body: some View {
         NavigationStack {
@@ -53,16 +48,6 @@ struct HomeView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
 
-                Button {
-                    showCamera = true
-                } label: {
-                    Label("Record Video", systemImage: "video")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(!cameraAvailable)
-
                 if let errorMessage {
                     Text(errorMessage).font(.footnote).foregroundStyle(.red)
                 }
@@ -79,16 +64,6 @@ struct HomeView: View {
             .onChange(of: pickerItem) { _, item in
                 guard let item else { return }
                 Task { await load(item) }
-            }
-            .fullScreenCover(isPresented: $showCamera, onDismiss: {
-                // Open the editor only after the camera has fully closed.
-                if let url = recordedURL {
-                    recordedURL = nil
-                    videoURL = url
-                }
-            }) {
-                CameraPicker { url in recordedURL = url }
-                    .ignoresSafeArea()
             }
             .navigationDestination(item: $videoURL) { url in
                 EditorView(url: url)
