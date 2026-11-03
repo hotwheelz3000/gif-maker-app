@@ -129,30 +129,36 @@ final class EditorModel: ObservableObject {
     }
 
     @Published var isLoadingThumbnails = false
+    @Published var thumbnailError: String?
 
+    /// Loads 10 trim-bar previews one at a time, showing each as soon as it's ready.
     private func makeThumbnails() async {
         isLoadingThumbnails = true
+        thumbnailError = nil
         defer { isLoadingThumbnails = false }
+
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         gen.appliesPreferredTrackTransform = true
         gen.maximumSize = CGSize(width: 160, height: 160)
+        // Nearest frame is fine for a preview strip (much faster than an exact frame).
+        gen.requestedTimeToleranceBefore = .positiveInfinity
+        gen.requestedTimeToleranceAfter = .positiveInfinity
+
         let count = 10
-        let times = (0..<count).map { i in
-            CMTime(seconds: duration * (Double(i) + 0.5) / Double(count), preferredTimescale: 600)
-        }
-        var images: [UIImage] = []
-        for await item in gen.images(for: times) {
-            if let cg = try? item.image { images.append(UIImage(cgImage: cg)) }
-        }
-        if images.isEmpty {
-            // Retry one frame at a time, letting the generator pick the nearest frame.
-            gen.requestedTimeToleranceBefore = .positiveInfinity
-            gen.requestedTimeToleranceAfter = .positiveInfinity
-            for t in times {
-                if let (cg, _) = try? await gen.image(at: t) { images.append(UIImage(cgImage: cg)) }
+        thumbnails = []
+        var lastError: Error?
+        for i in 0..<count {
+            let t = CMTime(seconds: duration * (Double(i) + 0.5) / Double(count), preferredTimescale: 600)
+            do {
+                let (cg, _) = try await gen.image(at: t)
+                thumbnails.append(UIImage(cgImage: cg))
+            } catch {
+                lastError = error
             }
         }
-        thumbnails = images
+        if thumbnails.isEmpty {
+            thumbnailError = "Couldn't load previews: \(lastError?.localizedDescription ?? "unknown error")"
+        }
     }
 
     // MARK: Playback (loops the trimmed range in the chosen loop style)

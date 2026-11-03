@@ -58,7 +58,17 @@ struct TrimBar: View {
                     .frame(width: track, height: height, alignment: .leading)
                     .background(Color.gray.opacity(0.3))
                     .overlay {
-                        if model.isLoadingThumbnails { ProgressView() }
+                        if let err = model.thumbnailError {
+                            Text(err)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(3)
+                                .minimumScaleFactor(0.7)
+                                .padding(.horizontal, 8)
+                        } else if model.isLoadingThumbnails && model.thumbnails.isEmpty {
+                            ProgressView().tint(.white)
+                        }
                     }
                     .offset(x: handleWidth)
                     .accessibilityHidden(true)

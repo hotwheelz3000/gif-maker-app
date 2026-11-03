@@ -218,12 +218,14 @@ struct EditorView: View {
     private var qualityPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             panelTitle("Size")
+            panelNote("How wide the GIF is in pixels. Bigger looks sharper but makes a larger file.")
             ChipPicker(
                 title: "Width",
                 options: [(320, "320"), (480, "480"), (720, "720")],
                 selection: $model.width
             )
             panelTitle("Frame rate")
+            panelNote("Frames per second. Higher is smoother, lower makes a smaller file.")
             ChipPicker(
                 title: "Frame rate",
                 options: [(10, "10"), (14, "14"), (15, "15"), (24, "24")].map { ($0.0, "\($0.1) fps") },
@@ -262,6 +264,13 @@ struct EditorView: View {
             .font(.subheadline.weight(.heavy))
             .foregroundStyle(.white)
             .accessibilityAddTraits(.isHeader)
+    }
+
+    private func panelNote(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(Theme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func rowLabel(_ text: String) -> some View {
