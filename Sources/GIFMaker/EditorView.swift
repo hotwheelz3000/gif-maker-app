@@ -93,6 +93,7 @@ struct EditorView: View {
                     section("Frame rate") {
                         Picker("FPS", selection: $model.fps) {
                             Text("10 fps").tag(10)
+                            Text("14 fps").tag(14)
                             Text("15 fps").tag(15)
                             Text("24 fps").tag(24)
                         }
