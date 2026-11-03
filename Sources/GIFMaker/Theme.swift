@@ -71,7 +71,10 @@ struct ChipButtonStyle: ButtonStyle {
             configuration.label
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(.white)
-                .padding(.horizontal, 14)
+                // Labels stay on one line and shrink to fit (e.g. "Boomerang", "24 fps").
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.horizontal, 10)
                 .frame(minWidth: 48, minHeight: 44)
                 .background(
                     selected ? AnyShapeStyle(Theme.gradient) : AnyShapeStyle(Theme.surface),
@@ -96,7 +99,10 @@ struct ChipPicker<Value: Hashable>: View {
                 Button {
                     selection = option.value
                 } label: {
-                    Text(option.label).frame(maxWidth: .infinity)
+                    Text(option.label)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(ChipButtonStyle(selected: selection == option.value))
                 .accessibilityLabel("\(title) \(option.label)")
