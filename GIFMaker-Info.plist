@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>GIF Maker</string>
+	<key>NSCameraUsageDescription</key>
+	<string>GIF Maker uses the camera to record videos to turn into GIFs.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The camera records video with sound. GIFs themselves are silent.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>GIF Maker opens videos from your library to turn into GIFs.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>GIF Maker saves your GIFs to your photo library.</string>
+</dict>
+</plist>

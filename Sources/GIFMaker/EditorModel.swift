@@ -1,0 +1,291 @@
+import AVFoundation
+import SwiftUI
+import UIKit
+
+enum CropAspect: String, CaseIterable, Identifiable {
+    case original = "Original"
+    case square = "1:1"
+    case threeTwo = "3:2"
+    case wide = "16:9"
+    case fourFive = "4:5"
+    case tall = "9:16"
+
+    var id: String { rawValue }
+
+    func ratio(for videoSize: CGSize) -> CGFloat {
+        switch self {
+        case .original: return videoSize.width / max(videoSize.height, 1)
+        case .square: return 1
+        case .threeTwo: return 3.0 / 2.0
+        case .wide: return 16.0 / 9.0
+        case .fourFive: return 4.0 / 5.0
+        case .tall: return 9.0 / 16.0
+        }
+    }
+}
+
+enum LoopMode: String, CaseIterable, Identifiable {
+    case normal = "Normal"
+    case reverse = "Reverse"
+    case boomerang = "Boomerang"
+    var id: String { rawValue }
+}
+
+struct GIFResult: Identifiable, Hashable {
+    let id = UUID()
+    let url: URL
+    let frameCount: Int
+    let pixelSize: CGSize
+    let bytes: Int
+
+    static func == (a: GIFResult, b: GIFResult) -> Bool { a.id == b.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+@MainActor
+final class EditorModel: ObservableObject {
+    static let maxClip: Double = 15
+    static let minClip: Double = 0.3
+
+    let url: URL
+    let asset: AVURLAsset
+    nonisolated(unsafe) let player: AVPlayer
+
+    @Published var isReady = false
+    @Published var loadError: String?
+    @Published var duration: Double = 0
+    @Published var videoSize: CGSize = .zero
+    @Published var thumbnails: [UIImage] = []
+    @Published var currentTime: Double = 0
+
+    // Trim
+    @Published var start: Double = 0
+    @Published var end: Double = 0
+
+    // Crop (center is in video pixels, top-left origin)
+    @Published var aspect: CropAspect = .original { didSet { zoom = 1; normalizeCenter() } }
+    @Published var zoom: CGFloat = 1
+    @Published var center: CGPoint = .zero
+
+    // Output
+    @Published var loopMode: LoopMode = .normal
+    @Published var speed: Double = 1 { didSet { if player.rate != 0 { player.rate = Float(speed) } } }
+    @Published var width: Int = 480
+    @Published var fps: Int = 15
+
+    // Export
+    @Published var isExporting = false
+    @Published var progress: Double = 0
+    @Published var exportError: String?
+    @Published var result: GIFResult?
+
+    nonisolated(unsafe) private var timeObserver: Any?
+    nonisolated(unsafe) private var endObserver: NSObjectProtocol?
+    private var isSeeking = false
+    private var isScrubbing = false
+    private var exportTask: Task<Void, Never>?
+
+    init(url: URL) {
+        self.url = url
+        self.asset = AVURLAsset(url: url)
+        self.player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        player.isMuted = true
+        player.actionAtItemEnd = .pause
+    }
+
+    deinit {
+        if let timeObserver { player.removeTimeObserver(timeObserver) }
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+    }
+
+    // MARK: Loading
+
+    func load() async {
+        guard !isReady else { return }
+        do {
+            let d = try await asset.load(.duration).seconds
+            guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+                loadError = "This file has no video track."
+                return
+            }
+            let (natural, transform) = try await track.load(.naturalSize, .preferredTransform)
+            let rect = CGRect(origin: .zero, size: natural).applying(transform)
+            videoSize = CGSize(width: abs(rect.width).rounded(), height: abs(rect.height).rounded())
+            duration = d.isFinite ? d : 0
+            start = 0
+            end = min(duration, 5)
+            center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)
+            isReady = true
+            startPlayback()
+            await makeThumbnails()
+        } catch {
+            loadError = "Couldn't read this video: \(error.localizedDescription)"
+        }
+    }
+
+    private func makeThumbnails() async {
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 160, height: 160)
+        let count = 10
+        let times = (0..<count).map { i in
+            CMTime(seconds: duration * (Double(i) + 0.5) / Double(count), preferredTimescale: 600)
+        }
+        var images: [UIImage] = []
+        for await item in gen.images(for: times) {
+            if let cg = try? item.image { images.append(UIImage(cgImage: cg)) }
+        }
+        thumbnails = images
+    }
+
+    // MARK: Playback (loops the trimmed range)
+
+    private func startPlayback() {
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(value: 1, timescale: 30), queue: .main
+        ) { [weak self] time in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let t = time.seconds
+                self.currentTime = t
+                guard !self.isScrubbing, !self.isSeeking else { return }
+                if t >= self.end - 0.02 || t < self.start - 0.2 {
+                    self.seek(to: self.start, thenPlay: true)
+                }
+            }
+        }
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isScrubbing, !self.isExporting else { return }
+                self.seek(to: self.start, thenPlay: true)
+            }
+        }
+        seek(to: start, thenPlay: true)
+    }
+
+    func seek(to seconds: Double, thenPlay: Bool) {
+        isSeeking = true
+        let target = CMTime(seconds: seconds, preferredTimescale: 600)
+        Task {
+            _ = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            isSeeking = false
+            if thenPlay && !isScrubbing && !isExporting { play() }
+        }
+    }
+
+    func play() { player.playImmediately(atRate: Float(speed)) }
+    func pause() { player.pause() }
+
+    func scrub(to seconds: Double) {
+        isScrubbing = true
+        player.pause()
+        guard !isSeeking else { return }
+        seek(to: seconds, thenPlay: false)
+    }
+
+    func endScrub() {
+        isScrubbing = false
+        seek(to: start, thenPlay: true)
+    }
+
+    // MARK: Trim
+
+    func setStart(_ value: Double) {
+        var v = min(max(0, value), end - Self.minClip)
+        v = max(v, 0)
+        if end - v > Self.maxClip { end = v + Self.maxClip }
+        start = v
+    }
+
+    func setEnd(_ value: Double) {
+        var v = max(min(duration, value), start + Self.minClip)
+        v = min(v, duration)
+        if v - start > Self.maxClip { start = v - Self.maxClip }
+        end = v
+    }
+
+    var clipLength: Double { max(0, end - start) }
+
+    // MARK: Crop
+
+    var cropRect: CGRect {
+        guard videoSize.width > 0, videoSize.height > 0 else { return .zero }
+        let a = aspect.ratio(for: videoSize)
+        var cw: CGFloat
+        var ch: CGFloat
+        if videoSize.width / videoSize.height > a {
+            ch = videoSize.height
+            cw = ch * a
+        } else {
+            cw = videoSize.width
+            ch = cw / a
+        }
+        cw /= zoom
+        ch /= zoom
+        let cx = min(max(center.x, cw / 2), videoSize.width - cw / 2)
+        let cy = min(max(center.y, ch / 2), videoSize.height - ch / 2)
+        return CGRect(x: cx - cw / 2, y: cy - ch / 2, width: cw, height: ch)
+    }
+
+    func normalizeCenter() {
+        let r = cropRect
+        guard r.width > 0 else { return }
+        center = CGPoint(x: r.midX, y: r.midY)
+    }
+
+    func resetCrop() {
+        zoom = 1
+        center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)
+    }
+
+    // MARK: Output info
+
+    var outputSize: CGSize {
+        let r = cropRect
+        guard r.width > 0 else { return .zero }
+        var w = min(CGFloat(width), r.width.rounded(.down))
+        w = max(2, (w / 2).rounded(.down) * 2)
+        let h = max(2, (w * r.height / r.width / 2).rounded() * 2)
+        return CGSize(width: w, height: h)
+    }
+
+    var estimatedFrames: Int {
+        let forward = Int((clipLength * Double(fps) / speed).rounded(.up))
+        switch loopMode {
+        case .normal, .reverse: return forward
+        case .boomerang: return max(forward, forward * 2 - 2)
+        }
+    }
+
+    // MARK: Export
+
+    func makeGIF() {
+        guard !isExporting, isReady else { return }
+        isExporting = true
+        progress = 0
+        exportError = nil
+        player.pause()
+        let settings = GIFSettings(
+            videoURL: url, start: start, end: end, crop: cropRect, videoSize: videoSize,
+            outputSize: outputSize, fps: fps, speed: speed, loopMode: loopMode
+        )
+        exportTask = Task {
+            do {
+                let made = try await GIFExporter.make(settings) { [weak self] p in
+                    Task { @MainActor in self?.progress = p }
+                }
+                self.result = made
+            } catch is CancellationError {
+            } catch {
+                self.exportError = error.localizedDescription
+            }
+            self.isExporting = false
+        }
+    }
+
+    func cancelExport() {
+        exportTask?.cancel()
+    }
+}

@@ -1,5 +1,7 @@
 version: 1
-bundleID: com.example.MyApp
+bundleID: com.hotwheelz3000.GIFMaker
 # The SwiftPM product used as the app. Also names the built .app/.ipa.
 # Change it with ./rename-app.sh rather than by hand.
-product: MyApp
+product: GIFMaker
+infoPath: GIFMaker-Info.plist
+iconPath: Resources/AppIcon.png

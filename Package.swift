@@ -3,7 +3,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "MyApp",
+    name: "GIFMaker",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
@@ -12,13 +12,16 @@ let package = Package(
         // An xtool project should contain exactly one library product,
         // representing the main app.
         .library(
-            name: "MyApp",
-            targets: ["MyApp"]
+            name: "GIFMaker",
+            targets: ["GIFMaker"]
         ),
     ],
     targets: [
         .target(
-            name: "MyApp"
+            name: "GIFMaker"
         ),
-    ]
+    ],
+    // Swift 5 language mode: avoids Swift 6 strict-concurrency build errors
+    // around AVFoundation callbacks.
+    swiftLanguageModes: [.v5]
 )

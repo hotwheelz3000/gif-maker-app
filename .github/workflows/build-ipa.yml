@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -63,3 +66,21 @@ jobs:
           name: ${{ steps.app.outputs.name }}-ipa
           path: xtool/${{ steps.app.outputs.name }}.ipa
           if-no-files-found: error
+
+      # Publishes the build as the "latest" release with a dated IPA name,
+      # so it can be downloaded from the repo's Releases page.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_NAME: ${{ steps.app.outputs.name }}
+        run: |
+          stamp=$(TZ=America/Los_Angeles date +%Y%m%d-%H%M)
+          ipa="$APP_NAME-$stamp.ipa"
+          cp "xtool/$APP_NAME.ipa" "$ipa"
+          gh release delete latest --cleanup-tag -y || true
+          sleep 3
+          gh release create latest "$ipa" \
+            --target "$GITHUB_SHA" \
+            --title "$APP_NAME $stamp" \
+            --notes "Unsigned build of ${GITHUB_SHA::7}. Sign it when installing." \
+            --latest
