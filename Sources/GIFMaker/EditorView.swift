@@ -48,19 +48,16 @@ struct EditorView: View {
                         .accessibilityHidden(true)
 
                         // Tap alternative to dragging the handles.
-                        HStack {
-                            nudgeGroup(
-                                title: "Start",
-                                minus: { model.nudgeStart(-0.1) },
-                                plus: { model.nudgeStart(0.1) }
-                            )
-                            Spacer()
-                            nudgeGroup(
-                                title: "End",
-                                minus: { model.nudgeEnd(-0.1) },
-                                plus: { model.nudgeEnd(0.1) }
-                            )
-                        }
+                        nudgeRow(
+                            title: "Start",
+                            plus: { model.nudgeStart(0.1) },
+                            minus: { model.nudgeStart(-0.1) }
+                        )
+                        nudgeRow(
+                            title: "End",
+                            plus: { model.nudgeEnd(0.1) },
+                            minus: { model.nudgeEnd(-0.1) }
+                        )
                     }
 
                     section("Crop") {
@@ -183,23 +180,26 @@ struct EditorView: View {
         }
     }
 
-    /// "Start  [−] [+]" with 44-point buttons that move a handle by 0.1 s.
-    private func nudgeGroup(title: String, minus: @escaping () -> Void, plus: @escaping () -> Void) -> some View {
-        HStack(spacing: 6) {
+    /// "Start ........ [+]  [−]" — 44-point buttons that move a handle by 0.1 s.
+    private func nudgeRow(title: String, plus: @escaping () -> Void, minus: @escaping () -> Void) -> some View {
+        HStack(spacing: 16) {
             Text(title).font(.subheadline).accessibilityHidden(true)
-            iconButton("minus", label: "\(title) earlier by a tenth of a second", action: minus)
-            iconButton("plus", label: "\(title) later by a tenth of a second", action: plus)
+            Spacer()
+            iconButton("plus", label: "\(title) later by a tenth of a second", size: .regular, action: plus)
+            iconButton("minus", label: "\(title) earlier by a tenth of a second", size: .regular, action: minus)
         }
     }
 
     /// Icon-only button with at least a 44 × 44 point tap area and a VoiceOver label.
-    private func iconButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(
+        _ systemName: String, label: String, size: ControlSize = .large, action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .frame(minWidth: 28, minHeight: 28)
+                .frame(minWidth: 30, minHeight: 30)
         }
         .buttonStyle(.bordered)
-        .controlSize(.large)
+        .controlSize(size)
         .frame(minWidth: 44, minHeight: 44)
         .accessibilityLabel(label)
     }

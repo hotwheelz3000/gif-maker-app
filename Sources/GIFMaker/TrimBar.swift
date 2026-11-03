@@ -57,6 +57,9 @@ struct TrimBar: View {
                     }
                     .frame(width: track, height: height, alignment: .leading)
                     .background(Color.gray.opacity(0.3))
+                    .overlay {
+                        if model.isLoadingThumbnails { ProgressView() }
+                    }
                     .offset(x: handleWidth)
                     .accessibilityHidden(true)
 

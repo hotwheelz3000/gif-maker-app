@@ -121,14 +121,19 @@ final class EditorModel: ObservableObject {
             center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)
             isReady = true
             startPlayback()
-            await makeThumbnails()
+            // Unstructured task: keeps running even if the view's .task is cancelled.
+            Task { await self.makeThumbnails() }
         } catch {
             loadError = "Couldn't read this video: \(error.localizedDescription)"
         }
     }
 
+    @Published var isLoadingThumbnails = false
+
     private func makeThumbnails() async {
-        let gen = AVAssetImageGenerator(asset: asset)
+        isLoadingThumbnails = true
+        defer { isLoadingThumbnails = false }
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         gen.appliesPreferredTrackTransform = true
         gen.maximumSize = CGSize(width: 160, height: 160)
         let count = 10
@@ -138,6 +143,14 @@ final class EditorModel: ObservableObject {
         var images: [UIImage] = []
         for await item in gen.images(for: times) {
             if let cg = try? item.image { images.append(UIImage(cgImage: cg)) }
+        }
+        if images.isEmpty {
+            // Retry one frame at a time, letting the generator pick the nearest frame.
+            gen.requestedTimeToleranceBefore = .positiveInfinity
+            gen.requestedTimeToleranceAfter = .positiveInfinity
+            for t in times {
+                if let (cg, _) = try? await gen.image(at: t) { images.append(UIImage(cgImage: cg)) }
+            }
         }
         thumbnails = images
     }
