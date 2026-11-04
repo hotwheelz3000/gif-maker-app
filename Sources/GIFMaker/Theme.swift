@@ -111,3 +111,31 @@ struct ChipPicker<Value: Hashable>: View {
         }
     }
 }
+
+/// Replaces the system back button so the swipe-back gesture is off on this screen.
+struct NoSwipeBack: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content
+            .navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Back")
+                }
+            }
+    }
+}
+
+extension View {
+    func noSwipeBack() -> some View { modifier(NoSwipeBack()) }
+}

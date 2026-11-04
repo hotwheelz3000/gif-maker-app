@@ -63,6 +63,7 @@ struct ResultView: View {
             if let message { AccessibilityNotification.Announcement(message).post() }
         }
         .navigationTitle("Your GIF")
+        .noSwipeBack()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)

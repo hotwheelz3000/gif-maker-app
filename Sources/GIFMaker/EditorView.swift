@@ -40,6 +40,7 @@ struct EditorView: View {
             }
         }
         .navigationTitle("Create")
+        .noSwipeBack()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
