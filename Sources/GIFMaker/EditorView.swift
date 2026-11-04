@@ -39,12 +39,20 @@ struct EditorView: View {
                 editor
             }
         }
-        .navigationTitle("Create")
+        .navigationTitle("")
         .noSwipeBack()
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
+            // No visible title; VoiceOver hears the current section (Trim, Crop, Loop, Quality).
+            ToolbarItem(placement: .principal) {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityLabel(tool.rawValue)
+                    .accessibilityAddTraits(.isHeader)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     model.makeGIF()
