@@ -1,187 +1,261 @@
 import SwiftUI
+import UIKit
 
-/// Thumbnail strip with draggable start and end handles.
-/// - Handles have 44-point grab areas.
+/// Trim strip with start and end handles.
+/// - Shows at most 30 seconds at once (zoomed in around the selection on long videos);
+///   a thin overview line underneath shows where that window sits in the whole video.
+/// - Handles move by how far you drag (no jump), have 44-point grab areas, and take
+///   priority over page scrolling.
 /// - Dragging inside the selection slides the whole window (keeps its length).
+/// - A light tap of haptics when the clip hits its shortest or longest length.
 /// - VoiceOver: each handle and the selection are adjustable (swipe up / down).
 struct TrimBar: View {
     @ObservedObject var model: EditorModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let handleWidth: CGFloat = 16   // visible width
+    private let handleWidth: CGFloat = 24   // visible width
     private let hitWidth: CGFloat = 44      // touch width
-    private let height: CGFloat = 56
+    private let height: CGFloat = 64
     private let bubbleHeight: CGFloat = 24
     private let bubbleGap: CGFloat = 6
+    private let overviewHeight: CGFloat = 4
+    private let overviewGap: CGFloat = 10
 
-    /// Time shown in the bubble while a handle is dragged; nil otherwise.
+    /// Time shown in the bubble while dragging; nil otherwise.
     @State private var draggingTime: Double?
-    /// Start time and finger x when a whole-selection drag began.
-    @State private var moveOrigin: (start: Double, x: CGFloat)?
+    /// Value (start or end time) when the current drag began.
+    @State private var dragOrigin: Double?
+    /// Whether the clip was at a length limit on the last drag update (for haptics).
+    @State private var atLimit = false
+
+    private var showsOverview: Bool { model.windowLength < model.duration - 0.01 }
 
     var body: some View {
         GeometryReader { geo in
             let track = max(geo.size.width - handleWidth * 2, 1)
-            let d = max(model.duration, 0.01)
-            let startX = handleWidth + CGFloat(model.start / d) * track
-            let endX = handleWidth + CGFloat(model.end / d) * track
-            let playX = handleWidth + CGFloat(min(max(model.currentTime, 0), d) / d) * track
+            let ws = model.windowStart
+            let wl = max(model.windowLength, 0.01)
+            let x: (Double) -> CGFloat = { t in handleWidth + CGFloat((t - ws) / wl) * track }
+            let startX = x(model.start)
+            let endX = x(model.end)
+            let playX = x(model.currentTime)
 
             VStack(alignment: .leading, spacing: bubbleGap) {
-                // Bubble above the selection: clip length, or the dragged handle's time.
-                Text(bubbleText)
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 8)
-                    .frame(height: bubbleHeight)
-                    .background(Capsule().fill(Color.yellow))
-                    .fixedSize()
-                    .position(
-                        x: min(max((startX + endX) / 2, 40), geo.size.width - 40),
-                        y: bubbleHeight / 2
-                    )
-                    .frame(width: geo.size.width, height: bubbleHeight)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: draggingTime == nil)
-                    .accessibilityHidden(true)
+                bubble(centerX: (startX + endX) / 2, width: geo.size.width)
 
                 ZStack(alignment: .topLeading) {
-                    // Thumbnails
-                    // Fixed slots: each preview fills its own equal slot (cropped, never stretched).
-                    HStack(spacing: 0) {
-                        let slotWidth = track / CGFloat(EditorModel.thumbnailCount)
-                        ForEach(0..<EditorModel.thumbnailCount, id: \.self) { i in
-                            ZStack {
-                                Color(white: 0.18)
-                                if i < model.thumbnails.count, let img = model.thumbnails[i] {
-                                    Image(uiImage: img)
-                                        .resizable()
-                                        .scaledToFill()
-                                }
-                            }
-                            .frame(width: slotWidth, height: height)
-                            .clipped()
-                        }
-                    }
-                    .frame(width: track, height: height, alignment: .leading)
-                    .background(Color.gray.opacity(0.3))
-                    .overlay {
-                        if let err = model.thumbnailError {
-                            Text(err)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.white)
-                                .multilineTextAlignment(.center)
-                                .lineLimit(3)
-                                .minimumScaleFactor(0.7)
-                                .padding(.horizontal, 8)
-                        } else if model.isLoadingThumbnails && model.thumbnails.allSatisfy({ $0 == nil }) {
-                            ProgressView().tint(.white)
-                        }
-                    }
-                    .offset(x: handleWidth)
-                    .accessibilityHidden(true)
+                    strip(track: track)
+                        .offset(x: handleWidth)
 
                     // Dim outside the selection
                     Color.black.opacity(0.55)
-                        .frame(width: max(startX - handleWidth, 0), height: height)
+                        .frame(width: max(min(startX, handleWidth + track) - handleWidth, 0), height: height)
                         .offset(x: handleWidth)
                         .accessibilityHidden(true)
                     Color.black.opacity(0.55)
-                        .frame(width: max(handleWidth + track - endX, 0), height: height)
-                        .offset(x: endX)
+                        .frame(width: max(handleWidth + track - max(endX, handleWidth), 0), height: height)
+                        .offset(x: max(endX, handleWidth))
                         .accessibilityHidden(true)
 
-                    // Selection: border, and a drag area that moves the whole window.
-                    Rectangle()
-                        .stroke(Color.yellow, lineWidth: 3)
-                        .frame(width: max(endX - startX, 0), height: height)
-                        .contentShape(Rectangle())
+                    selection(width: max(endX - startX, 0), track: track, wl: wl)
                         .offset(x: startX)
-                        .gesture(
-                            DragGesture(minimumDistance: 4, coordinateSpace: .named("trim"))
-                                .onChanged { v in
-                                    if moveOrigin == nil { moveOrigin = (model.start, v.startLocation.x) }
-                                    guard let o = moveOrigin else { return }
-                                    let dt = Double((v.location.x - o.x) / track) * d
-                                    model.moveSelection(start: o.start + dt)
-                                    draggingTime = model.start
-                                    model.scrub(to: model.start)
-                                }
-                                .onEnded { _ in
-                                    moveOrigin = nil
-                                    draggingTime = nil
-                                    model.endScrub()
-                                }
-                        )
-                        .accessibilityElement()
-                        .accessibilityLabel("Selection")
-                        .accessibilityValue("\(timeString(model.start)) to \(timeString(model.end)), \(String(format: "%.1f", model.clipLength)) seconds")
-                        .accessibilityHint("Swipe up or down to move the selection by half a second.")
-                        .accessibilityAdjustableAction { dir in
-                            let step = dir == .increment ? 0.5 : -0.5
-                            model.moveSelection(start: model.start + step)
-                            model.restartLoop()
-                        }
 
-                    // Playhead
-                    Rectangle()
-                        .fill(Color.white)
-                        .frame(width: 2, height: height + 8)
-                        .offset(x: playX - 1, y: -4)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                    // Playhead (hidden when outside the visible window)
+                    if playX >= handleWidth && playX <= handleWidth + track {
+                        Rectangle()
+                            .fill(Color.white)
+                            .frame(width: 2, height: height + 8)
+                            .offset(x: playX - 1, y: -4)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
 
-                    handle(systemName: "chevron.compact.left")
-                        // Visible part sits just left of the selection; grab area is centered on it.
+                    startHandle(track: track, wl: wl)
                         .offset(x: startX - handleWidth / 2 - hitWidth / 2)
-                        .gesture(
-                            DragGesture(minimumDistance: 0, coordinateSpace: .named("trim"))
-                                .onChanged { v in
-                                    let t = Double((v.location.x - handleWidth) / track) * d
-                                    model.setStart(t)
-                                    draggingTime = model.start
-                                    model.scrub(to: model.start)
-                                }
-                                .onEnded { _ in
-                                    draggingTime = nil
-                                    model.endScrub()
-                                }
-                        )
-                        .accessibilityElement()
-                        .accessibilityLabel("Start")
-                        .accessibilityValue(timeString(model.start))
-                        .accessibilityHint("Swipe up or down to change by a tenth of a second.")
-                        .accessibilityAdjustableAction { dir in
-                            model.nudgeStart(dir == .increment ? 0.1 : -0.1)
-                        }
-
-                    handle(systemName: "chevron.compact.right")
+                    endHandle(track: track, wl: wl)
                         .offset(x: endX + handleWidth / 2 - hitWidth / 2)
-                        .gesture(
-                            DragGesture(minimumDistance: 0, coordinateSpace: .named("trim"))
-                                .onChanged { v in
-                                    let t = Double((v.location.x - handleWidth) / track) * d
-                                    model.setEnd(t)
-                                    draggingTime = model.end
-                                    model.scrub(to: model.end)
-                                }
-                                .onEnded { _ in
-                                    draggingTime = nil
-                                    model.endScrub()
-                                }
-                        )
-                        .accessibilityElement()
-                        .accessibilityLabel("End")
-                        .accessibilityValue(timeString(model.end))
-                        .accessibilityHint("Swipe up or down to change by a tenth of a second.")
-                        .accessibilityAdjustableAction { dir in
-                            model.nudgeEnd(dir == .increment ? 0.1 : -0.1)
-                        }
                 }
                 .frame(width: geo.size.width, height: height, alignment: .topLeading)
-                .coordinateSpace(name: "trim")
+
+                if showsOverview {
+                    overview(track: track)
+                        .padding(.top, overviewGap - bubbleGap)
+                        .offset(x: handleWidth)
+                }
             }
         }
-        .frame(height: height + bubbleHeight + bubbleGap)
+        .frame(height: height + bubbleHeight + bubbleGap + (showsOverview ? overviewHeight + overviewGap : 0))
+    }
+
+    // MARK: Pieces
+
+    private func bubble(centerX: CGFloat, width: CGFloat) -> some View {
+        Text(bubbleText)
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.black)
+            .padding(.horizontal, 8)
+            .frame(height: bubbleHeight)
+            .background(Capsule().fill(Color.yellow))
+            .fixedSize()
+            .position(x: min(max(centerX, 40), width - 40), y: bubbleHeight / 2)
+            .frame(width: width, height: bubbleHeight)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: draggingTime == nil)
+            .accessibilityHidden(true)
+    }
+
+    /// Previews for the whole video, laid out wide and shifted so only the window shows.
+    private func strip(track: CGFloat) -> some View {
+        let d = max(model.duration, 0.01)
+        let fullWidth = track * CGFloat(d / max(model.windowLength, 0.01))
+        let count = max(model.thumbnails.count, 1)
+        let slotWidth = fullWidth / CGFloat(count)
+        return HStack(spacing: 0) {
+            ForEach(0..<count, id: \.self) { i in
+                ZStack {
+                    Color(white: 0.18)
+                    if i < model.thumbnails.count, let img = model.thumbnails[i] {
+                        Image(uiImage: img).resizable().scaledToFill()
+                    }
+                }
+                .frame(width: slotWidth, height: height)
+                .clipped()
+            }
+        }
+        .frame(width: fullWidth, height: height, alignment: .leading)
+        .offset(x: -fullWidth * CGFloat(model.windowStart / d))
+        .frame(width: track, height: height, alignment: .leading)
+        .clipped()
+        .background(Color.gray.opacity(0.3))
+        .overlay {
+            if let err = model.thumbnailError {
+                Text(err)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 8)
+            } else if model.isLoadingThumbnails && model.thumbnails.allSatisfy({ $0 == nil }) {
+                ProgressView().tint(.white)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Thin line for the whole video: grey = all, light = visible window, yellow = selection.
+    private func overview(track: CGFloat) -> some View {
+        let d = max(model.duration, 0.01)
+        let px: (Double) -> CGFloat = { t in CGFloat(t / d) * track }
+        return ZStack(alignment: .leading) {
+            Capsule().fill(Color(white: 0.25)).frame(width: track)
+            Capsule().fill(Color(white: 0.55))
+                .frame(width: max(px(model.windowLength), 4))
+                .offset(x: px(model.windowStart))
+            Capsule().fill(Color.yellow)
+                .frame(width: max(px(model.clipLength), 3))
+                .offset(x: px(model.start))
+        }
+        .frame(width: track, height: overviewHeight, alignment: .leading)
+        .accessibilityHidden(true)
+    }
+
+    private func selection(width: CGFloat, track: CGFloat, wl: Double) -> some View {
+        Rectangle()
+            .stroke(Color.yellow, lineWidth: 3)
+            .frame(width: width, height: height)
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 4)
+                    .onChanged { v in
+                        if dragOrigin == nil { dragOrigin = model.start }
+                        guard let origin = dragOrigin else { return }
+                        let dt = Double(v.translation.width / track) * wl
+                        // Stay inside the visible window while dragging; it recenters after.
+                        let lo = model.windowStart
+                        let hi = model.windowStart + model.windowLength - model.clipLength
+                        model.moveSelection(start: min(max(origin + dt, lo), max(lo, hi)))
+                        draggingTime = model.start
+                        model.scrub(to: model.start)
+                    }
+                    .onEnded { _ in endDrag() }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("Selection")
+            .accessibilityValue("\(timeString(model.start)) to \(timeString(model.end)), \(String(format: "%.1f", model.clipLength)) seconds")
+            .accessibilityHint("Swipe up or down to move the selection by half a second.")
+            .accessibilityAdjustableAction { dir in
+                model.moveSelection(start: model.start + (dir == .increment ? 0.5 : -0.5))
+                model.keepSelectionVisible()
+                model.restartLoop()
+            }
+    }
+
+    private func startHandle(track: CGFloat, wl: Double) -> some View {
+        handle(systemName: "chevron.compact.left")
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        if dragOrigin == nil { dragOrigin = model.start }
+                        guard let origin = dragOrigin else { return }
+                        let t = origin + Double(v.translation.width / track) * wl
+                        model.setStart(max(t, model.windowStart))
+                        draggingTime = model.start
+                        checkLimit()
+                        model.scrub(to: model.start)
+                    }
+                    .onEnded { _ in endDrag() }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("Start")
+            .accessibilityValue(timeString(model.start))
+            .accessibilityHint("Swipe up or down to change by a tenth of a second.")
+            .accessibilityAdjustableAction { dir in
+                model.nudgeStart(dir == .increment ? 0.1 : -0.1)
+            }
+    }
+
+    private func endHandle(track: CGFloat, wl: Double) -> some View {
+        handle(systemName: "chevron.compact.right")
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        if dragOrigin == nil { dragOrigin = model.end }
+                        guard let origin = dragOrigin else { return }
+                        let t = origin + Double(v.translation.width / track) * wl
+                        model.setEnd(min(t, model.windowStart + model.windowLength))
+                        draggingTime = model.end
+                        checkLimit()
+                        model.scrub(to: model.end)
+                    }
+                    .onEnded { _ in endDrag() }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("End")
+            .accessibilityValue(timeString(model.end))
+            .accessibilityHint("Swipe up or down to change by a tenth of a second.")
+            .accessibilityAdjustableAction { dir in
+                model.nudgeEnd(dir == .increment ? 0.1 : -0.1)
+            }
+    }
+
+    private func endDrag() {
+        dragOrigin = nil
+        draggingTime = nil
+        atLimit = false
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+            model.recenterWindow()
+        }
+        model.endScrub()
+    }
+
+    /// Light haptic tap when the clip first reaches its shortest or longest length.
+    private func checkLimit() {
+        let len = model.clipLength
+        let limited = len >= EditorModel.maxClip - 0.001 || len <= EditorModel.minClip + 0.001
+        if limited && !atLimit {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        atLimit = limited
     }
 
     private var bubbleText: String {
@@ -189,14 +263,14 @@ struct TrimBar: View {
         return String(format: "%.1fs", model.clipLength)
     }
 
-    /// A 16-point yellow handle inside a 44-point invisible grab area.
+    /// A 24-point yellow handle inside a 44-point invisible grab area.
     private func handle(systemName: String) -> some View {
         ZStack {
             Color.clear
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: 6)
                 .fill(Color.yellow)
                 .frame(width: handleWidth, height: height)
-                .overlay(Image(systemName: systemName).font(.headline).foregroundStyle(.black))
+                .overlay(Image(systemName: systemName).font(.title3.weight(.bold)).foregroundStyle(.black))
         }
         .frame(width: hitWidth, height: height)
         .contentShape(Rectangle())

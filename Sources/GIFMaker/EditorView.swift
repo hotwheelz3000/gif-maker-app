@@ -276,7 +276,9 @@ struct EditorView: View {
     private func rowLabel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline.weight(.bold))
-            .frame(width: 52, alignment: .leading)
+            .lineLimit(1)
+            .fixedSize()
+            .frame(minWidth: 52, alignment: .leading)
             .accessibilityHidden(true)
     }
 

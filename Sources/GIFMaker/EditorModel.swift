@@ -57,7 +57,28 @@ final class EditorModel: ObservableObject {
     @Published var duration: Double = 0
     @Published var videoSize: CGSize = .zero
     @Published var thumbnails: [UIImage?] = []
-    static let thumbnailCount = 10
+    /// Number of previews across the whole video (more for long videos, so the
+    /// zoomed-in strip still has enough pictures).
+    var thumbnailCount: Int {
+        guard duration > Self.windowMax else { return 10 }
+        return min(40, Int((10 * duration / Self.windowMax).rounded(.up)))
+    }
+
+    // Strip zoom: the trim bar shows at most this many seconds at once.
+    static let windowMax: Double = 30
+    @Published var windowStart: Double = 0
+    var windowLength: Double { min(duration, Self.windowMax) }
+
+    /// Centers the visible window on the selection.
+    func recenterWindow() {
+        let mid = (start + end) / 2
+        windowStart = min(max(0, mid - windowLength / 2), max(0, duration - windowLength))
+    }
+
+    /// Recenters only if part of the selection is outside the visible window.
+    func keepSelectionVisible() {
+        if start < windowStart - 0.001 || end > windowStart + windowLength + 0.001 { recenterWindow() }
+    }
     @Published var currentTime: Double = 0
     @Published var canReverse = false
 
@@ -119,6 +140,7 @@ final class EditorModel: ObservableObject {
             duration = d.isFinite ? d : 0
             start = 0
             end = min(duration, 5)
+            recenterWindow()
             center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)
             isReady = true
             // Previews first, then playback: the video decoder can't reliably do both at once.
@@ -146,7 +168,7 @@ final class EditorModel: ObservableObject {
         gen.requestedTimeToleranceBefore = tolerance
         gen.requestedTimeToleranceAfter = tolerance
 
-        let count = Self.thumbnailCount
+        let count = thumbnailCount
         thumbnails = Array(repeating: nil, count: count)
         var slotForTime: [Int64: Int] = [:]
         var times: [CMTime] = []
@@ -333,11 +355,13 @@ final class EditorModel: ObservableObject {
 
     func nudgeStart(_ delta: Double) {
         setStart(start + delta)
+        keepSelectionVisible()
         restartLoop()
     }
 
     func nudgeEnd(_ delta: Double) {
         setEnd(end + delta)
+        keepSelectionVisible()
         restartLoop()
     }
 
