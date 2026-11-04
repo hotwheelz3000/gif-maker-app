@@ -56,7 +56,8 @@ final class EditorModel: ObservableObject {
     @Published var loadError: String?
     @Published var duration: Double = 0
     @Published var videoSize: CGSize = .zero
-    @Published var thumbnails: [UIImage] = []
+    @Published var thumbnails: [UIImage?] = []
+    static let thumbnailCount = 10
     @Published var currentTime: Double = 0
     @Published var canReverse = false
 
@@ -131,7 +132,8 @@ final class EditorModel: ObservableObject {
     @Published var isLoadingThumbnails = false
     @Published var thumbnailError: String?
 
-    /// Loads 10 trim-bar previews one at a time, showing each as soon as it's ready.
+    /// Loads the trim-bar previews into fixed slots, showing each as soon as it's ready.
+    /// Misses are retried twice (the video decoder may be busy with the preview player).
     private func makeThumbnails() async {
         isLoadingThumbnails = true
         thumbnailError = nil
@@ -139,24 +141,30 @@ final class EditorModel: ObservableObject {
 
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         gen.appliesPreferredTrackTransform = true
-        gen.maximumSize = CGSize(width: 160, height: 160)
+        gen.maximumSize = CGSize(width: 320, height: 320)
         // Nearest frame is fine for a preview strip (much faster than an exact frame).
         gen.requestedTimeToleranceBefore = .positiveInfinity
         gen.requestedTimeToleranceAfter = .positiveInfinity
 
-        let count = 10
-        thumbnails = []
+        let count = Self.thumbnailCount
+        thumbnails = Array(repeating: nil, count: count)
         var lastError: Error?
-        for i in 0..<count {
-            let t = CMTime(seconds: duration * (Double(i) + 0.5) / Double(count), preferredTimescale: 600)
-            do {
-                let (cg, _) = try await gen.image(at: t)
-                thumbnails.append(UIImage(cgImage: cg))
-            } catch {
-                lastError = error
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: 400_000_000)
             }
+            for i in 0..<count where thumbnails[i] == nil {
+                let t = CMTime(seconds: duration * (Double(i) + 0.5) / Double(count), preferredTimescale: 600)
+                do {
+                    let (cg, _) = try await gen.image(at: t)
+                    thumbnails[i] = UIImage(cgImage: cg)
+                } catch {
+                    lastError = error
+                }
+            }
+            if !thumbnails.contains(where: { $0 == nil }) { break }
         }
-        if thumbnails.isEmpty {
+        if thumbnails.allSatisfy({ $0 == nil }) {
             thumbnailError = "Couldn't load previews: \(lastError?.localizedDescription ?? "unknown error")"
         }
     }

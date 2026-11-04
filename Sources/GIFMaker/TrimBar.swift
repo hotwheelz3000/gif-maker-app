@@ -46,13 +46,20 @@ struct TrimBar: View {
 
                 ZStack(alignment: .topLeading) {
                     // Thumbnails
+                    // Fixed slots: each preview fills its own equal slot (cropped, never stretched).
                     HStack(spacing: 0) {
-                        ForEach(Array(model.thumbnails.enumerated()), id: \.offset) { _, img in
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: track / CGFloat(max(model.thumbnails.count, 1)), height: height)
-                                .clipped()
+                        let slotWidth = track / CGFloat(EditorModel.thumbnailCount)
+                        ForEach(0..<EditorModel.thumbnailCount, id: \.self) { i in
+                            ZStack {
+                                Color(white: 0.18)
+                                if i < model.thumbnails.count, let img = model.thumbnails[i] {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                }
+                            }
+                            .frame(width: slotWidth, height: height)
+                            .clipped()
                         }
                     }
                     .frame(width: track, height: height, alignment: .leading)
@@ -66,7 +73,7 @@ struct TrimBar: View {
                                 .lineLimit(3)
                                 .minimumScaleFactor(0.7)
                                 .padding(.horizontal, 8)
-                        } else if model.isLoadingThumbnails && model.thumbnails.isEmpty {
+                        } else if model.isLoadingThumbnails && model.thumbnails.allSatisfy({ $0 == nil }) {
                             ProgressView().tint(.white)
                         }
                     }
