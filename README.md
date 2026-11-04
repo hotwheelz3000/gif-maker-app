@@ -1,10 +1,12 @@
 # GIF Maker
 
-An iPhone app that turns videos into GIFs. Built with [xtool](https://xtool.sh) from the my-ios-app template, so no Mac or Xcode is needed: GitHub Actions builds the IPA.
+An iPhone app that turns videos into GIFs, and edits GIFs. Built with [xtool](https://xtool.sh) from the my-ios-app template, so no Mac or Xcode is needed: GitHub Actions builds the IPA.
 
 ## Features
 
-**Choose a video** from Photos. Everything runs on the phone. There's no server and no account.
+**Choose a Video** or **Choose a GIF** from Photos. Everything runs on the phone. There's no server and no account.
+
+**Editing a GIF** uses the same tools. Its frames are read straight from the file (no video step), so nothing is lost and transparency stays. The whole GIF (up to 15 seconds) starts selected, and Size and Frame rate start on **Original**: the GIF's own size, frames and timing (including frames that last longer than others). Picking something that isn't a GIF says so.
 
 The editor has a big preview on top and four tools along the bottom (Trim, Crop, Loop, Quality). **Next** in the top-right corner makes the GIF.
 
@@ -23,7 +25,7 @@ The editor has a big preview on top and four tools along the bottom (Trim, Crop,
 - Speed: 0.5x, 1x, 1.5x or 2x.
 
 **Quality**
-- Width 320, 480 or 720 pixels (default 720) and 10, 14, 15 or 24 frames per second (default 15), each with a short explanation. The output size and frame count are shown underneath.
+- Width 320, 480 or 720 pixels (default 720) and 10, 14, 15 or 24 frames per second (default 15), each with a short explanation. GIFs also get **Original** for both (the default for GIFs). The output size and frame count are shown underneath.
 
 **Your GIF**
 - The GIF plays on a loop, with its loop style, size, frame count and file size.
@@ -38,16 +40,16 @@ The editor has a big preview on top and four tools along the bottom (Trim, Crop,
 **Also**
 - Swipe-back is off; use the ‹ button at the top left to go back.
 - Copied videos and made GIFs are kept in the app's temporary folder and cleared each time the app starts (save or share a GIF to keep it).
-- The Home screen shows the version ("Version 1.0").
+- The Home screen shows the version ("Version 1.1").
 
 ## Download
 
-Every push to `main` builds an unsigned IPA and publishes it as the **latest** release, titled with the version ("GIF Maker 1.0"), with the IPA named `GIFMaker-<version>.ipa` and the release notes taken from `RELEASE_NOTES.md`. Sign it when installing (Signulous, Sideloadly, AltStore or `xtool install`).
+Every push to `main` builds an unsigned IPA and publishes it as the **latest** release, titled with the version ("GIF Maker 1.1"), with the IPA named `GIFMaker-<version>.ipa` and the release notes taken from `RELEASE_NOTES.md`. Sign it when installing (Signulous, Sideloadly, AltStore or `xtool install`).
 
 The version is `CFBundleShortVersionString` in `GIFMaker-Info.plist`.
 
 ## Project
 
-- `Sources/GIFMaker/`: the app (SwiftUI). `EditorModel.swift` holds the editor's state and playback, `GIFExporter.swift` makes the GIF, `TrimBar.swift` the trim strip.
+- `Sources/GIFMaker/`: the app (SwiftUI). `EditorModel.swift` holds the editor's state and playback, `GIFExporter.swift` makes the GIF, `TrimBar.swift` the trim strip, `GIFSource.swift` reads GIFs for editing.
 - `.github/workflows/build-ipa.yml`: builds the IPA with xtool and publishes the release.
 - `.claude/skills/`: `using-xtool`, plus the `fresh-eyes-review` and `documentation-audit` review skills from Soulection Radio (versions recorded in `skills-lock.json`).

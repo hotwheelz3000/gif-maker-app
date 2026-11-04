@@ -1,3 +1,9 @@
+## GIF Maker 1.1
+
+- **Edit GIFs:** tap **Choose a GIF** (under Choose a Video) to open a GIF from your library and trim, crop, loop, speed it up or resize it with the same tools.
+- **No quality loss:** a GIF's frames are used as they are (no video step), so edits keep the original detail and transparency.
+- **Original size and timing:** for GIFs, Size and Frame rate start on **Original**, keeping the GIF's own size, frames and timing.
+
 ## GIF Maker 1.0
 
 The first version: turn any video from Photos into a GIF, right on the iPhone.

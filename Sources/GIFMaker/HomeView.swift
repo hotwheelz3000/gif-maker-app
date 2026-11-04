@@ -20,9 +20,16 @@ struct Movie: Transferable {
     }
 }
 
+/// What the editor opens: a video, or a GIF to edit.
+struct EditorInput: Hashable {
+    let url: URL
+    let isGIF: Bool
+}
+
 struct HomeView: View {
     @State private var pickerItem: PhotosPickerItem?
-    @State private var videoURL: URL?
+    @State private var gifPickerItem: PhotosPickerItem?
+    @State private var input: EditorInput?
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -41,7 +48,7 @@ struct HomeView: View {
                         .font(.system(size: 44, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .accessibilityAddTraits(.isHeader)
-                    Text("Turn any video into a GIF.\nTrim it, crop it, loop it.")
+                    Text("Turn any video into a GIF, or edit one.\nTrim it, crop it, loop it.")
                         .font(.body.weight(.semibold))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(Theme.secondaryText)
@@ -52,6 +59,12 @@ struct HomeView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(PillButtonStyle())
+
+                    PhotosPicker(selection: $gifPickerItem, matching: .images) {
+                        Label("Choose a GIF", systemImage: "square.stack.3d.down.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(PillButtonStyle(prominent: false))
 
                     if let errorMessage {
                         Text(errorMessage)
@@ -69,7 +82,7 @@ struct HomeView: View {
             .toolbarBackground(Theme.background, for: .navigationBar)
             .overlay {
                 if isLoading {
-                    ProgressView("Loading video...")
+                    ProgressView("Loading...")
                         .tint(.white)
                         .padding(24)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20))
@@ -79,8 +92,12 @@ struct HomeView: View {
                 guard let item else { return }
                 Task { await load(item) }
             }
-            .navigationDestination(item: $videoURL) { url in
-                EditorView(url: url)
+            .onChange(of: gifPickerItem) { _, item in
+                guard let item else { return }
+                Task { await loadGIF(item) }
+            }
+            .navigationDestination(item: $input) { input in
+                EditorView(url: input.url, isGIF: input.isGIF)
             }
         }
         .tint(.white)
@@ -95,12 +112,31 @@ struct HomeView: View {
         }
         do {
             if let movie = try await item.loadTransferable(type: Movie.self) {
-                videoURL = movie.url
+                input = EditorInput(url: movie.url, isGIF: false)
             } else {
                 errorMessage = "Couldn't open that video."
             }
         } catch {
             errorMessage = "Couldn't open that video: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadGIF(_ item: PhotosPickerItem) async {
+        isLoading = true
+        errorMessage = nil
+        defer {
+            isLoading = false
+            gifPickerItem = nil
+        }
+        let notGIF = "That's not a GIF. Pick a GIF from your library."
+        guard item.supportedContentTypes.contains(where: { $0.conforms(to: .gif) }) else {
+            errorMessage = notGIF
+            return
+        }
+        if let file = try? await item.loadTransferable(type: GIFFile.self) {
+            input = EditorInput(url: file.url, isGIF: true)
+        } else {
+            errorMessage = "Couldn't open that GIF."
         }
     }
 }

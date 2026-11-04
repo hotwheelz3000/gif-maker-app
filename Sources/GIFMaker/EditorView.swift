@@ -24,8 +24,8 @@ struct EditorView: View {
     @StateObject private var model: EditorModel
     @State private var tool: Tool = .trim
 
-    init(url: URL) {
-        _model = StateObject(wrappedValue: EditorModel(url: url))
+    init(url: URL, isGIF: Bool = false) {
+        _model = StateObject(wrappedValue: EditorModel(url: url, isGIF: isGIF))
     }
 
     var body: some View {
@@ -227,17 +227,22 @@ struct EditorView: View {
     private var qualityPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             panelTitle("Size")
-            panelNote("How wide the GIF is in pixels. Bigger looks sharper but makes a larger file.")
+            panelNote(model.isGIF
+                ? "How wide the GIF is in pixels. Original keeps the GIF's own size, so nothing is lost."
+                : "How wide the GIF is in pixels. Bigger looks sharper but makes a larger file.")
             ChipPicker(
                 title: "Width",
-                options: [(320, "320"), (480, "480"), (720, "720")],
+                options: (model.isGIF ? [(0, "Original")] : []) + [(320, "320"), (480, "480"), (720, "720")],
                 selection: $model.width
             )
             panelTitle("Frame rate")
-            panelNote("Frames per second. Higher is smoother, lower makes a smaller file.")
+            panelNote(model.isGIF
+                ? "Frames per second. Original keeps the GIF's own frames and timing."
+                : "Frames per second. Higher is smoother, lower makes a smaller file.")
             ChipPicker(
                 title: "Frame rate",
-                options: [(10, "10"), (14, "14"), (15, "15"), (24, "24")].map { ($0.0, "\($0.1) fps") },
+                options: (model.isGIF ? [(0, "Original")] : [])
+                    + [(10, "10"), (14, "14"), (15, "15"), (24, "24")].map { ($0.0, "\($0.1) fps") },
                 selection: $model.fps
             )
             let size = model.outputSize

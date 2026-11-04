@@ -51,6 +51,10 @@ final class EditorModel: ObservableObject {
     let url: URL
     let asset: AVURLAsset
     nonisolated(unsafe) let player: AVPlayer
+    /// Set when editing a GIF: frames are read straight from the file (no video step).
+    let gif: GIFSource?
+    /// True when a GIF was picked (even if it then couldn't be read).
+    let isGIF: Bool
 
     @Published var isReady = false
     @Published var loadError: String?
@@ -125,13 +129,18 @@ final class EditorModel: ObservableObject {
     // smoothly (phone videos only decode smoothly forwards), so the clip's frames are
     // read ahead of time, like the GIF export does, and played in loop order.
     @Published private(set) var previewFrames: [Data] = []
+    /// Seconds each prepared frame shows (by frame index).
+    @Published private(set) var previewDurations: [Double] = []
+    /// Single frame shown for a GIF while dragging or while its preview is prepared.
+    @Published private(set) var stillImage: UIImage?
     @Published private(set) var previewFramesID = UUID()
     @Published private(set) var isPreparingPreview = false
     private var framePreviewFailed = false
     private var previewKey = ""
     private var previewTask: Task<Void, Never>?
 
-    var usesFramePreview: Bool { loopMode != .normal && !framePreviewFailed }
+    /// GIFs always use the frame preview; videos only for Reverse and Boomerang.
+    var usesFramePreview: Bool { isGIF || (loopMode != .normal && !framePreviewFailed) }
 
     /// True when the frame player (not the video player) should be on screen.
     var showsFramePreview: Bool {
@@ -164,10 +173,21 @@ final class EditorModel: ObservableObject {
     @Published private(set) var isScrubbing = false
     private var exportTask: Task<Void, Never>?
 
-    init(url: URL) {
+    init(url: URL, isGIF: Bool = false) {
         self.url = url
+        self.isGIF = isGIF
         self.asset = AVURLAsset(url: url)
-        self.player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        if isGIF {
+            // GIFs never use the video player; it stays empty.
+            self.gif = GIFSource(url: url)
+            self.player = AVPlayer()
+            // Original size and timing by default, so nothing is lost.
+            self.width = 0
+            self.fps = 0
+        } else {
+            self.gif = nil
+            self.player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+        }
         player.isMuted = true
         player.actionAtItemEnd = .pause
     }
@@ -180,6 +200,10 @@ final class EditorModel: ObservableObject {
 
     func load() async {
         guard !isReady else { return }
+        if isGIF {
+            await loadGIF()
+            return
+        }
         do {
             let d = try await asset.load(.duration).seconds
             guard let track = try await asset.loadTracks(withMediaType: .video).first else {
@@ -208,6 +232,38 @@ final class EditorModel: ObservableObject {
         }
     }
 
+    private func loadGIF() async {
+        guard let gif else {
+            loadError = "Couldn't read that GIF."
+            return
+        }
+        videoSize = gif.size
+        duration = gif.duration
+        guard duration >= Self.minClip else {
+            loadError = "This GIF is too short to edit."
+            return
+        }
+        start = 0
+        end = min(duration, Self.maxClip)   // the whole GIF (up to 15 s) starts selected
+        recenterWindow()
+        center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)
+        stillImage = Self.previewImage(gif, at: 0)
+        isReady = true
+        await Task { await self.makeThumbnails() }.value
+        startPlayback()
+    }
+
+    /// One GIF frame, scaled down for the preview.
+    nonisolated static func previewImage(_ gif: GIFSource, at t: Double) -> UIImage? {
+        guard let cg = gif.image(at: gif.frameIndex(at: t)) else { return nil }
+        let scale = min(1, 720 / max(gif.size.width, gif.size.height))
+        let size = CGSize(width: gif.size.width * scale, height: gif.size.height * scale)
+        guard let small = GIFExporter.render(
+            cg, crop: CGRect(origin: .zero, size: gif.size), videoSize: gif.size, outSize: size
+        ) else { return nil }
+        return UIImage(cgImage: small)
+    }
+
     /// Loads the trim-bar previews into fixed slots, the same way the GIF export reads
     /// frames (one batch request), then retries any misses one at a time.
     private func makeThumbnails() async {
@@ -223,6 +279,19 @@ final class EditorModel: ObservableObject {
 
         let count = thumbnailCount
         thumbnails = Array(repeating: nil, count: count)
+
+        if let gif {
+            let d = duration
+            thumbnails = await Task.detached {
+                (0..<count).map { i -> UIImage? in
+                    let t = d * (Double(i) + 0.5) / Double(count)
+                    return gif.image(at: gif.frameIndex(at: t)).map { Self.small($0) }
+                }
+            }.value
+            if thumbnails.allSatisfy({ $0 == nil }) { thumbnailError = "Couldn't load previews." }
+            return
+        }
+
         var slotForTime: [Int64: Int] = [:]
         var times: [CMTime] = []
         for i in 0..<count {
@@ -266,7 +335,7 @@ final class EditorModel: ObservableObject {
     }
 
     /// Scales a frame down to about 240 points tall for the strip.
-    private static func small(_ cg: CGImage) -> UIImage {
+    private nonisolated static func small(_ cg: CGImage) -> UIImage {
         let full = UIImage(cgImage: cg)
         let scale = min(1, 240 / max(full.size.height, 1))
         let size = CGSize(width: full.size.width * scale, height: full.size.height * scale)
@@ -394,27 +463,68 @@ final class EditorModel: ObservableObject {
         }
         previewTask?.cancel()
         isPreparingPreview = true
-        // Show the clip's first frame while preparing.
-        Task { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
-        let url = self.url, s = start, e = end, sp = speed, f = fps
+        let url = self.url, s = start, e = end, sp = speed, f = fps, gif = self.gif
+        if let gif {
+            stillImage = Self.previewImage(gif, at: s)
+        } else {
+            // Show the clip's first frame while preparing.
+            Task { _ = await player.seek(to: CMTime(seconds: s, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+        }
         previewTask = Task {
             // Short wait so quick repeated changes only prepare once.
             try? await Task.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
-            let frames = (try? await Self.makePreviewFrames(url: url, start: s, end: e, speed: sp, fps: f)) ?? []
+            let made: ([Data], [Double])
+            if let gif {
+                made = (try? await Task.detached {
+                    try Self.makeGIFPreviewFrames(gif, start: s, end: e, speed: sp, fps: f)
+                }.value) ?? ([], [])
+            } else {
+                let frames = (try? await Self.makePreviewFrames(url: url, start: s, end: e, speed: sp, fps: f)) ?? []
+                made = (frames, Array(repeating: 1.0 / Double(max(f, 1)), count: frames.count))
+            }
             if Task.isCancelled { return }
-            if frames.isEmpty {
-                // Couldn't read frames: fall back to the video player.
-                framePreviewFailed = true
+            if made.0.isEmpty {
                 isPreparingPreview = false
-                restartLoop()
+                // A GIF keeps showing its still frame; a video falls back to the video player.
+                if gif == nil {
+                    framePreviewFailed = true
+                    restartLoop()
+                }
                 return
             }
-            previewFrames = frames
+            previewFrames = made.0
+            previewDurations = made.1
             previewKey = key
             previewFramesID = UUID()
             isPreparingPreview = false
         }
+    }
+
+    /// GIF preview: the planned frames (decoded in order, each once) as small JPEGs.
+    nonisolated static func makeGIFPreviewFrames(
+        _ gif: GIFSource, start: Double, end: Double, speed: Double, fps: Int
+    ) throws -> ([Data], [Double]) {
+        let scale = min(1, 720 / max(gif.size.width, gif.size.height))
+        let size = CGSize(width: (gif.size.width * scale).rounded(), height: (gif.size.height * scale).rounded())
+        let full = CGRect(origin: .zero, size: gif.size)
+        var made: [Int: Data] = [:]
+        var frames: [Data] = []
+        var durations: [Double] = []
+        for step in gif.plan(start: start, end: end, speed: speed, fps: fps) {
+            try Task.checkCancellation()
+            var data = made[step.index]
+            if data == nil, let cg = gif.image(at: step.index),
+               let small = GIFExporter.render(cg, crop: full, videoSize: gif.size, outSize: size) {
+                data = GIFExporter.jpegData(small)
+                made[step.index] = data
+            }
+            if let data {
+                frames.append(data)
+                durations.append(step.duration)
+            }
+        }
+        return (frames, durations)
     }
 
     /// Reads the trimmed range forwards (the fast direction) as small JPEGs.
@@ -461,7 +571,20 @@ final class EditorModel: ObservableObject {
         }
         scrubTarget = seconds
         guard !isSeeking else { return }
-        runScrubSeek()
+        if gif != nil { runGIFScrub() } else { runScrubSeek() }
+    }
+
+    /// GIF: decode the frame at the latest target off the main thread, then catch up.
+    private func runGIFScrub() {
+        guard let gif, let seconds = scrubTarget else { return }
+        scrubTarget = nil
+        isSeeking = true
+        Task {
+            let img = await Task.detached { Self.previewImage(gif, at: seconds) }.value
+            if let img { stillImage = img }
+            isSeeking = false
+            if isScrubbing && scrubTarget != nil { runGIFScrub() }
+        }
     }
 
     /// Fast (nearest-frame) seek to the latest target, then again if the finger moved on.
@@ -580,6 +703,10 @@ final class EditorModel: ObservableObject {
     var outputSize: CGSize {
         let r = cropRect
         guard r.width > 0 else { return .zero }
+        if width <= 0 {
+            // Original: the cropped area at its own pixel size.
+            return CGSize(width: max(1, r.width.rounded()), height: max(1, r.height.rounded()))
+        }
         var w = min(CGFloat(width), r.width.rounded(.down))
         w = max(2, (w / 2).rounded(.down) * 2)
         let h = max(2, (w * r.height / r.width / 2).rounded() * 2)
@@ -587,7 +714,8 @@ final class EditorModel: ObservableObject {
     }
 
     var estimatedFrames: Int {
-        let forward = Int((clipLength * Double(fps) / speed).rounded(.up))
+        let forward = gif?.plan(start: start, end: end, speed: speed, fps: fps).count
+            ?? Int((clipLength * Double(max(fps, 1)) / speed).rounded(.up))
         switch loopMode {
         case .normal, .reverse: return forward
         case .boomerang: return max(forward, forward * 2 - 2)
@@ -604,7 +732,8 @@ final class EditorModel: ObservableObject {
         pause()   // also stops any frame preview being prepared, freeing the decoder
         let settings = GIFSettings(
             videoURL: url, start: start, end: end, crop: cropRect, videoSize: videoSize,
-            outputSize: outputSize, fps: fps, speed: speed, loopMode: loopMode
+            outputSize: outputSize, fps: fps, speed: speed, loopMode: loopMode,
+            gifURL: gif?.url
         )
         exportTask = Task {
             do {

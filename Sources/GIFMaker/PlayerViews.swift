@@ -57,14 +57,15 @@ struct GIFPlayerView: UIViewRepresentable {
     }
 }
 
-/// Plays prepared JPEG frames in a given order at a steady rate, driven by the
-/// screen refresh (CADisplayLink). Frames are decoded a few ahead on a background
-/// queue so playback never waits on decoding.
+/// Plays prepared JPEG frames in a given order, each for its own duration, driven by the
+/// screen refresh (CADisplayLink). Frames are decoded a few ahead on a background queue so
+/// playback never waits on decoding.
 struct FramePlayerView: UIViewRepresentable {
     let frames: [Data]
     let framesID: UUID
     let order: [Int]
-    let fps: Int
+    /// Seconds each frame shows, by frame index (same length as frames).
+    let durations: [Double]
 
     func makeUIView(context: Context) -> FramePlayerUIView {
         let v = FramePlayerUIView()
@@ -75,12 +76,12 @@ struct FramePlayerView: UIViewRepresentable {
         v.contentMode = .scaleToFill
         v.clipsToBounds = true
         v.isUserInteractionEnabled = false
-        v.configure(frames: frames, id: framesID, order: order, fps: fps)
+        v.configure(frames: frames, id: framesID, order: order, durations: durations)
         return v
     }
 
     func updateUIView(_ v: FramePlayerUIView, context: Context) {
-        v.configure(frames: frames, id: framesID, order: order, fps: fps)
+        v.configure(frames: frames, id: framesID, order: order, durations: durations)
     }
 
     static func dismantleUIView(_ v: FramePlayerUIView, coordinator: ()) {
@@ -92,7 +93,9 @@ final class FramePlayerUIView: UIImageView {
     private var frames: [Data] = []
     private var framesID: UUID?
     private var order: [Int] = []
-    private var fps: Double = 15
+    private var durations: [Double] = []
+    /// End time of each position in play order (for finding the frame at a time).
+    private var ends: [Double] = []
     private var link: CADisplayLink?
     private var startTime: CFTimeInterval?
     private var shownIndex = -1
@@ -100,21 +103,25 @@ final class FramePlayerUIView: UIImageView {
     private var pending = Set<Int>()
     private let decodeQueue = DispatchQueue(label: "frame-preview-decode", qos: .userInteractive)
 
-    func configure(frames: [Data], id: UUID, order: [Int], fps: Int) {
-        let newFPS = Double(max(fps, 1))
-        guard id != framesID || order != self.order || newFPS != self.fps else { return }
+    func configure(frames: [Data], id: UUID, order: [Int], durations: [Double]) {
+        guard id != framesID || order != self.order || durations != self.durations else { return }
         if id != framesID {
             cache = [:]
             pending = []
             self.frames = frames
             framesID = id
         }
-        self.order = order
-        self.fps = newFPS
+        self.order = order.filter { $0 < frames.count }
+        self.durations = durations
+        var t = 0.0
+        ends = self.order.map { i in
+            t += max(i < durations.count ? durations[i] : 0.1, 0.01)
+            return t
+        }
         startTime = nil
         shownIndex = -1
         // Show the first frame right away.
-        if let first = order.first, first < frames.count {
+        if let first = self.order.first {
             if cache[first] == nil, let img = UIImage(data: frames[first]) { cache[first] = img }
             image = cache[first]
             shownIndex = first
@@ -141,10 +148,16 @@ final class FramePlayerUIView: UIImageView {
     }
 
     @objc private func step(_ l: CADisplayLink) {
-        guard !order.isEmpty else { return }
+        guard !order.isEmpty, let total = ends.last, total > 0 else { return }
         if startTime == nil { startTime = l.timestamp }
-        let elapsed = l.timestamp - (startTime ?? l.timestamp)
-        let pos = Int(elapsed * fps) % order.count
+        let elapsed = (l.timestamp - (startTime ?? l.timestamp)).truncatingRemainder(dividingBy: total)
+        // First position whose end is after the elapsed time.
+        var lo = 0, hi = ends.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if ends[mid] > elapsed { hi = mid } else { lo = mid + 1 }
+        }
+        let pos = lo
         let idx = order[pos]
         if idx != shownIndex, let img = cache[idx] {
             image = img

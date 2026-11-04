@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Live video preview showing only the cropped area. Drag to move, pinch to zoom.
+/// Live preview (video, or GIF frames) showing only the cropped area. Drag to move,
+/// pinch to zoom.
 struct CropPreview: View {
     @ObservedObject var model: EditorModel
     var maxHeight: CGFloat = 360
@@ -23,8 +24,11 @@ struct CropPreview: View {
                         frames: model.previewFrames,
                         framesID: model.previewFramesID,
                         order: model.previewOrder,
-                        fps: model.fps
+                        durations: model.previewDurations
                     )
+                } else if model.isGIF, let still = model.stillImage {
+                    // GIF while dragging a handle or while its preview is prepared.
+                    Image(uiImage: still).resizable()
                 }
             }
                 .frame(width: model.videoSize.width * s, height: model.videoSize.height * s)
