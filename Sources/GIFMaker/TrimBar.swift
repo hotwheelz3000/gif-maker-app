@@ -135,7 +135,7 @@ struct TrimBar: View {
             .frame(width: width, height: height)
             .contentShape(Rectangle())
             .highPriorityGesture(
-                DragGesture(minimumDistance: 4)
+                DragGesture(minimumDistance: 4, coordinateSpace: .global)
                     .onChanged { v in
                         if dragOrigin == nil { dragOrigin = model.start }
                         guard let origin = dragOrigin else { return }
@@ -163,7 +163,7 @@ struct TrimBar: View {
     private func startHandle(track: CGFloat, wl: Double) -> some View {
         handle(systemName: "chevron.compact.left")
             .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { v in
                         if dragOrigin == nil { dragOrigin = model.start }
                         guard let origin = dragOrigin else { return }
@@ -187,7 +187,7 @@ struct TrimBar: View {
     private func endHandle(track: CGFloat, wl: Double) -> some View {
         handle(systemName: "chevron.compact.right")
             .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { v in
                         if dragOrigin == nil { dragOrigin = model.end }
                         guard let origin = dragOrigin else { return }
