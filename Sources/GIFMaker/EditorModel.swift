@@ -151,7 +151,10 @@ final class EditorModel: ObservableObject {
         var slotForTime: [Int64: Int] = [:]
         var times: [CMTime] = []
         for i in 0..<count {
-            let t = CMTime(value: Int64((duration * (Double(i) + 0.5) / Double(count) * 600).rounded()), timescale: 600)
+            let fraction: Double = (Double(i) + 0.5) / Double(count)
+            let seconds: Double = duration * fraction
+            let value = Int64((seconds * 600).rounded())
+            let t = CMTime(value: value, timescale: 600)
             slotForTime[t.value] = i
             times.append(t)
         }
