@@ -16,7 +16,17 @@ struct CropPreview: View {
             let h = w / max(a, 0.01)
             let s = w / max(crop.width, 1)
 
-            PlayerLayerView(player: model.player)
+            ZStack {
+                PlayerLayerView(player: model.player)
+                if model.showsFramePreview {
+                    FramePlayerView(
+                        frames: model.previewFrames,
+                        framesID: model.previewFramesID,
+                        order: model.previewOrder,
+                        fps: model.fps
+                    )
+                }
+            }
                 .frame(width: model.videoSize.width * s, height: model.videoSize.height * s)
                 .offset(x: -crop.minX * s, y: -crop.minY * s)
                 .frame(width: w, height: h, alignment: .topLeading)
@@ -27,6 +37,20 @@ struct CropPreview: View {
         }
         .frame(height: maxHeight)
         .background(Color.black)
+        .overlay(alignment: .bottom) {
+            if model.isPreparingPreview {
+                HStack(spacing: 8) {
+                    ProgressView().tint(.white)
+                    Text("Preparing preview…").font(.caption.weight(.bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.black.opacity(0.7), in: Capsule())
+                .padding(.bottom, 10)
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 
     private func dragGesture(scale s: CGFloat) -> some Gesture {

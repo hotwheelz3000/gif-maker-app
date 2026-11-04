@@ -92,12 +92,50 @@ final class EditorModel: ObservableObject {
     @Published var center: CGPoint = .zero
 
     // Output
-    @Published var loopMode: LoopMode = .normal { didSet { if isReady { restartLoop() } } }
+    @Published var loopMode: LoopMode = .normal {
+        didSet {
+            framePreviewFailed = false
+            if isReady { restartLoop() }
+        }
+    }
     @Published var speed: Double = 1 {
-        didSet { if player.rate != 0 { player.rate = direction < 0 ? reverseRate : Float(speed) } }
+        didSet {
+            if usesFramePreview { if isReady { restartLoop() } }
+            else if player.rate != 0 { player.rate = direction < 0 ? reverseRate : Float(speed) }
+        }
     }
     @Published var width: Int = 720
-    @Published var fps: Int = 15
+    @Published var fps: Int = 15 { didSet { if usesFramePreview && isReady { restartLoop() } } }
+
+    // Frame preview for Reverse / Boomerang. The video player can't play backwards
+    // smoothly (phone videos only decode smoothly forwards), so the clip's frames are
+    // read ahead of time, like the GIF export does, and played in loop order.
+    @Published private(set) var previewFrames: [Data] = []
+    @Published private(set) var previewFramesID = UUID()
+    @Published private(set) var isPreparingPreview = false
+    private var framePreviewFailed = false
+    private var previewKey = ""
+    private var previewTask: Task<Void, Never>?
+
+    var usesFramePreview: Bool { loopMode != .normal && !framePreviewFailed }
+
+    /// True when the frame player (not the video player) should be on screen.
+    var showsFramePreview: Bool {
+        usesFramePreview && !previewFrames.isEmpty && !isPreparingPreview && !isScrubbing
+    }
+
+    /// Order to play the prepared frames in, matching the GIF.
+    var previewOrder: [Int] {
+        let n = previewFrames.count
+        guard n > 0 else { return [] }
+        switch loopMode {
+        case .normal: return Array(0..<n)
+        case .reverse: return Array((0..<n).reversed())
+        case .boomerang:
+            let back = n > 2 ? Array((1..<(n - 1)).reversed()) : []
+            return Array(0..<n) + back
+        }
+    }
 
     // Export
     @Published var isExporting = false
@@ -109,7 +147,7 @@ final class EditorModel: ObservableObject {
     private var direction: Float = 1
     private var isActive = false
     private var isSeeking = false
-    private var isScrubbing = false
+    @Published private(set) var isScrubbing = false
     private var exportTask: Task<Void, Never>?
 
     init(url: URL) {
@@ -250,6 +288,11 @@ final class EditorModel: ObservableObject {
 
     private func tick() {
         let t = player.currentTime().seconds
+        if usesFramePreview {
+            // Frame preview drives itself; hide the playhead unless scrubbing.
+            if isScrubbing, t.isFinite { currentTime = t } else if currentTime != -1 { currentTime = -1 }
+            return
+        }
         if t.isFinite { currentTime = t }
         guard isActive, !isScrubbing, !isSeeking, !isExporting, t.isFinite else { return }
         if !canReverse { canReverse = player.currentItem?.canPlayReverse ?? false }
@@ -282,6 +325,12 @@ final class EditorModel: ObservableObject {
     /// Starts the loop from the right end for the current loop style.
     func restartLoop() {
         isActive = true
+        if usesFramePreview {
+            prepareFramePreview()
+            return
+        }
+        previewTask?.cancel()
+        isPreparingPreview = false
         if loopMode == .reverse && canReverse {
             seek(to: end, direction: -1)
         } else {
@@ -302,12 +351,84 @@ final class EditorModel: ObservableObject {
     }
 
     func play() {
+        // In frame-preview mode the video player stays paused (it would compete
+        // with the frame reader for the video decoder).
+        guard !usesFramePreview else { player.pause(); return }
         player.playImmediately(atRate: direction < 0 ? reverseRate : Float(speed))
     }
 
     func pause() {
         isActive = false
         player.pause()
+    }
+
+    // MARK: Frame preview
+
+    private func prepareFramePreview() {
+        player.pause()
+        let key = "\(start)|\(end)|\(speed)|\(fps)"
+        if key == previewKey && !previewFrames.isEmpty {
+            previewTask?.cancel()
+            isPreparingPreview = false
+            return
+        }
+        previewTask?.cancel()
+        isPreparingPreview = true
+        // Show the clip's first frame while preparing.
+        Task { _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) }
+        let url = self.url, s = start, e = end, sp = speed, f = fps
+        previewTask = Task {
+            // Short wait so quick repeated changes only prepare once.
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            if Task.isCancelled { return }
+            let frames = (try? await Self.makePreviewFrames(url: url, start: s, end: e, speed: sp, fps: f)) ?? []
+            if Task.isCancelled { return }
+            if frames.isEmpty {
+                // Couldn't read frames: fall back to the video player.
+                framePreviewFailed = true
+                isPreparingPreview = false
+                restartLoop()
+                return
+            }
+            previewFrames = frames
+            previewKey = key
+            previewFramesID = UUID()
+            isPreparingPreview = false
+        }
+    }
+
+    /// Reads the trimmed range forwards (the fast direction) as small JPEGs.
+    nonisolated static func makePreviewFrames(
+        url: URL, start: Double, end: Double, speed: Double, fps: Int
+    ) async throws -> [Data] {
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 720, height: 720)
+        let step = speed / Double(max(fps, 1))
+        let tolerance = CMTime(seconds: step / 2, preferredTimescale: 600)
+        gen.requestedTimeToleranceBefore = tolerance
+        gen.requestedTimeToleranceAfter = tolerance
+
+        var times: [CMTime] = []
+        var slotForTime: [Int64: Int] = [:]
+        var t = start
+        while t < end - 0.0001 {
+            let value = Int64((t * 600).rounded())
+            if slotForTime[value] == nil {
+                slotForTime[value] = times.count
+                times.append(CMTime(value: value, timescale: 600))
+            }
+            t += step
+        }
+        var slots = [Data?](repeating: nil, count: times.count)
+        for await item in gen.images(for: times) {
+            try Task.checkCancellation()
+            let key = CMTimeConvertScale(item.requestedTime, timescale: 600, method: .roundHalfAwayFromZero).value
+            if let slot = slotForTime[key], let cg = try? item.image {
+                slots[slot] = GIFExporter.jpegData(cg)
+            }
+        }
+        return slots.compactMap { $0 }
     }
 
     func scrub(to seconds: Double) {
@@ -443,6 +564,10 @@ final class EditorModel: ObservableObject {
         progress = 0
         exportError = nil
         pause()
+        // Free the video decoder for the export.
+        previewTask?.cancel()
+        isPreparingPreview = false
+        previewKey = previewFrames.isEmpty ? "" : previewKey
         let settings = GIFSettings(
             videoURL: url, start: start, end: end, crop: cropRect, videoSize: videoSize,
             outputSize: outputSize, fps: fps, speed: speed, loopMode: loopMode
