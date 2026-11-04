@@ -56,7 +56,8 @@ final class EditorModel: ObservableObject {
     @Published var loadError: String?
     @Published var duration: Double = 0
     @Published var videoSize: CGSize = .zero
-    @Published var thumbnails: [UIImage?] = []
+    @Published var thumbnails: [UIImage?] = [] { didSet { thumbnailsVersion &+= 1 } }
+    private(set) var thumbnailsVersion = 0
     /// Number of previews across the whole video (more for long videos, so the
     /// zoomed-in strip still has enough pictures).
     var thumbnailCount: Int {
@@ -79,7 +80,13 @@ final class EditorModel: ObservableObject {
     func keepSelectionVisible() {
         if start < windowStart - 0.001 || end > windowStart + windowLength + 0.001 { recenterWindow() }
     }
-    @Published var currentTime: Double = 0
+    /// Playhead time lives in its own small object so updating it 30 times a second
+    /// only redraws the playhead, not the whole editor.
+    let clock = PlaybackClock()
+    var currentTime: Double {
+        get { clock.time }
+        set { if clock.time != newValue { clock.time = newValue } }
+    }
     @Published var canReverse = false
 
     // Trim
@@ -431,21 +438,37 @@ final class EditorModel: ObservableObject {
         return slots.compactMap { $0 }
     }
 
+    /// Latest position asked for while dragging; seeks always catch up to it.
+    private var scrubTarget: Double?
+
     func scrub(to seconds: Double) {
-        isScrubbing = true
-        player.pause()
+        if !isScrubbing {
+            isScrubbing = true
+            player.pause()
+        }
+        scrubTarget = seconds
         guard !isSeeking else { return }
+        runScrubSeek()
+    }
+
+    /// Fast (nearest-frame) seek to the latest target, then again if the finger moved on.
+    private func runScrubSeek() {
+        guard let seconds = scrubTarget else { return }
+        scrubTarget = nil
         isSeeking = true
         let target = CMTime(seconds: seconds, preferredTimescale: 600)
+        let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
         Task {
-            _ = await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+            _ = await player.seek(to: target, toleranceBefore: tolerance, toleranceAfter: tolerance)
             isSeeking = false
+            if isScrubbing && scrubTarget != nil { runScrubSeek() }
         }
     }
 
     func endScrub() {
+        scrubTarget = nil
         isScrubbing = false
-        restartLoop()
+        restartLoop()   // exact seek to the start of the clip
     }
 
     // MARK: Trim
@@ -454,14 +477,14 @@ final class EditorModel: ObservableObject {
         var v = min(max(0, value), end - Self.minClip)
         v = max(v, 0)
         if end - v > Self.maxClip { end = v + Self.maxClip }
-        start = v
+        if start != v { start = v }
     }
 
     func setEnd(_ value: Double) {
         var v = max(min(duration, value), start + Self.minClip)
         v = min(v, duration)
         if v - start > Self.maxClip { start = v - Self.maxClip }
-        end = v
+        if end != v { end = v }
     }
 
     var clipLength: Double { max(0, end - start) }
@@ -590,4 +613,9 @@ final class EditorModel: ObservableObject {
     func cancelExport() {
         exportTask?.cancel()
     }
+}
+
+/// Holds just the playhead time (see EditorModel.clock).
+final class PlaybackClock: ObservableObject {
+    @Published var time: Double = 0
 }

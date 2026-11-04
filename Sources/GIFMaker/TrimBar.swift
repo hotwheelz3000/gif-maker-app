@@ -38,14 +38,24 @@ struct TrimBar: View {
             let x: (Double) -> CGFloat = { t in handleWidth + CGFloat((t - ws) / wl) * track }
             let startX = x(model.start)
             let endX = x(model.end)
-            let playX = x(model.currentTime)
 
             VStack(alignment: .leading, spacing: bubbleGap) {
                 bubble(centerX: (startX + endX) / 2, width: geo.size.width)
 
                 ZStack(alignment: .topLeading) {
-                    strip(track: track)
-                        .offset(x: handleWidth)
+                    ThumbnailStrip(
+                        thumbnails: model.thumbnails,
+                        version: model.thumbnailsVersion,
+                        duration: model.duration,
+                        windowStart: model.windowStart,
+                        windowLength: model.windowLength,
+                        track: track,
+                        height: height,
+                        error: model.thumbnailError,
+                        loading: model.isLoadingThumbnails
+                    )
+                    .equatable()
+                    .offset(x: handleWidth)
 
                     // Dim outside the selection
                     Color.black.opacity(0.55)
@@ -60,15 +70,14 @@ struct TrimBar: View {
                     selection(width: max(endX - startX, 0), track: track, wl: wl)
                         .offset(x: startX)
 
-                    // Playhead (hidden when outside the visible window)
-                    if playX >= handleWidth && playX <= handleWidth + track {
-                        Rectangle()
-                            .fill(Color.white)
-                            .frame(width: 2, height: height + 8)
-                            .offset(x: playX - 1, y: -4)
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
+                    Playhead(
+                        clock: model.clock,
+                        windowStart: ws,
+                        windowLength: wl,
+                        track: track,
+                        inset: handleWidth,
+                        height: height
+                    )
 
                     startHandle(track: track, wl: wl)
                         .offset(x: startX - handleWidth / 2 - hitWidth / 2)
@@ -101,45 +110,6 @@ struct TrimBar: View {
             .frame(width: width, height: bubbleHeight)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: draggingTime == nil)
             .accessibilityHidden(true)
-    }
-
-    /// Previews for the whole video, laid out wide and shifted so only the window shows.
-    private func strip(track: CGFloat) -> some View {
-        let d = max(model.duration, 0.01)
-        let fullWidth = track * CGFloat(d / max(model.windowLength, 0.01))
-        let count = max(model.thumbnails.count, 1)
-        let slotWidth = fullWidth / CGFloat(count)
-        return HStack(spacing: 0) {
-            ForEach(0..<count, id: \.self) { i in
-                ZStack {
-                    Color(white: 0.18)
-                    if i < model.thumbnails.count, let img = model.thumbnails[i] {
-                        Image(uiImage: img).resizable().scaledToFill()
-                    }
-                }
-                .frame(width: slotWidth, height: height)
-                .clipped()
-            }
-        }
-        .frame(width: fullWidth, height: height, alignment: .leading)
-        .offset(x: -fullWidth * CGFloat(model.windowStart / d))
-        .frame(width: track, height: height, alignment: .leading)
-        .clipped()
-        .background(Color.gray.opacity(0.3))
-        .overlay {
-            if let err = model.thumbnailError {
-                Text(err)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 8)
-            } else if model.isLoadingThumbnails && model.thumbnails.allSatisfy({ $0 == nil }) {
-                ProgressView().tint(.white)
-            }
-        }
-        .accessibilityHidden(true)
     }
 
     /// Thin line for the whole video: grey = all, light = visible window, yellow = selection.
@@ -280,4 +250,87 @@ struct TrimBar: View {
 func timeString(_ s: Double) -> String {
     let m = Int(max(s, 0)) / 60
     return String(format: "%d:%04.1f", m, max(s, 0) - Double(m * 60))
+}
+
+/// The playhead line. Watches only the playback clock, so it can move 30 times a
+/// second without redrawing the rest of the trim bar.
+private struct Playhead: View {
+    @ObservedObject var clock: PlaybackClock
+    let windowStart: Double
+    let windowLength: Double
+    let track: CGFloat
+    let inset: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        let x = inset + CGFloat((clock.time - windowStart) / max(windowLength, 0.01)) * track
+        if x >= inset && x <= inset + track {
+            Rectangle()
+                .fill(Color.white)
+                .frame(width: 2, height: height + 8)
+                .offset(x: x - 1, y: -4)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// Previews for the whole video, laid out wide and shifted so only the visible window
+/// shows. Equatable, so it only redraws when its pictures or the window change (not on
+/// every handle movement).
+private struct ThumbnailStrip: View, Equatable {
+    let thumbnails: [UIImage?]
+    let version: Int
+    let duration: Double
+    let windowStart: Double
+    let windowLength: Double
+    let track: CGFloat
+    let height: CGFloat
+    let error: String?
+    let loading: Bool
+
+    static func == (a: ThumbnailStrip, b: ThumbnailStrip) -> Bool {
+        a.version == b.version && a.duration == b.duration && a.windowStart == b.windowStart
+            && a.windowLength == b.windowLength && a.track == b.track && a.height == b.height
+            && a.error == b.error && a.loading == b.loading
+    }
+
+    var body: some View {
+        let d = max(duration, 0.01)
+        let fullWidth = track * CGFloat(d / max(windowLength, 0.01))
+        let count = max(thumbnails.count, 1)
+        let slotWidth = fullWidth / CGFloat(count)
+        HStack(spacing: 0) {
+            ForEach(0..<count, id: \.self) { i in
+                ZStack {
+                    Color(white: 0.18)
+                    if i < thumbnails.count, let img = thumbnails[i] {
+                        Image(uiImage: img).resizable().scaledToFill()
+                    }
+                }
+                .frame(width: slotWidth, height: height)
+                .clipped()
+            }
+        }
+        .drawingGroup()
+        .frame(width: fullWidth, height: height, alignment: .leading)
+        .offset(x: -fullWidth * CGFloat(windowStart / d))
+        .frame(width: track, height: height, alignment: .leading)
+        .clipped()
+        .background(Color.gray.opacity(0.3))
+        .overlay {
+            if let error {
+                Text(error)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 8)
+            } else if loading && thumbnails.allSatisfy({ $0 == nil }) {
+                ProgressView().tint(.white)
+            }
+        }
+        .accessibilityHidden(true)
+    }
 }
