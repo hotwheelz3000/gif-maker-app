@@ -121,9 +121,10 @@ final class EditorModel: ObservableObject {
             end = min(duration, 5)
             center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)
             isReady = true
+            // Previews first, then playback: the video decoder can't reliably do both at once.
+            // (Unstructured task so it isn't cancelled along with the view's .task.)
+            await Task { await self.makeThumbnails() }.value
             startPlayback()
-            // Unstructured task: keeps running even if the view's .task is cancelled.
-            Task { await self.makeThumbnails() }
         } catch {
             loadError = "Couldn't read this video: \(error.localizedDescription)"
         }
@@ -132,8 +133,8 @@ final class EditorModel: ObservableObject {
     @Published var isLoadingThumbnails = false
     @Published var thumbnailError: String?
 
-    /// Loads the trim-bar previews into fixed slots, showing each as soon as it's ready.
-    /// Misses are retried twice (the video decoder may be busy with the preview player).
+    /// Loads the trim-bar previews into fixed slots, the same way the GIF export reads
+    /// frames (one batch request), then retries any misses one at a time.
     private func makeThumbnails() async {
         isLoadingThumbnails = true
         thumbnailError = nil
@@ -141,31 +142,60 @@ final class EditorModel: ObservableObject {
 
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         gen.appliesPreferredTrackTransform = true
-        gen.maximumSize = CGSize(width: 320, height: 320)
-        // Nearest frame is fine for a preview strip (much faster than an exact frame).
-        gen.requestedTimeToleranceBefore = .positiveInfinity
-        gen.requestedTimeToleranceAfter = .positiveInfinity
+        let tolerance = CMTime(seconds: max(duration / 40, 0.1), preferredTimescale: 600)
+        gen.requestedTimeToleranceBefore = tolerance
+        gen.requestedTimeToleranceAfter = tolerance
 
         let count = Self.thumbnailCount
         thumbnails = Array(repeating: nil, count: count)
+        var slotForTime: [Int64: Int] = [:]
+        var times: [CMTime] = []
+        for i in 0..<count {
+            let t = CMTime(value: Int64((duration * (Double(i) + 0.5) / Double(count) * 600).rounded()), timescale: 600)
+            slotForTime[t.value] = i
+            times.append(t)
+        }
+
         var lastError: Error?
-        for attempt in 0..<3 {
-            if attempt > 0 {
-                try? await Task.sleep(nanoseconds: 400_000_000)
+        for await item in gen.images(for: times) {
+            let key = CMTimeConvertScale(item.requestedTime, timescale: 600, method: .roundHalfAwayFromZero).value
+            guard let slot = slotForTime[key] else { continue }
+            do {
+                thumbnails[slot] = Self.small(try item.image)
+            } catch {
+                lastError = error
             }
+        }
+
+        // Retry misses one at a time, nearest frame allowed.
+        gen.requestedTimeToleranceBefore = .positiveInfinity
+        gen.requestedTimeToleranceAfter = .positiveInfinity
+        for attempt in 0..<2 where thumbnails.contains(where: { $0 == nil }) {
+            if attempt > 0 { try? await Task.sleep(nanoseconds: 300_000_000) }
             for i in 0..<count where thumbnails[i] == nil {
-                let t = CMTime(seconds: duration * (Double(i) + 0.5) / Double(count), preferredTimescale: 600)
                 do {
-                    let (cg, _) = try await gen.image(at: t)
-                    thumbnails[i] = UIImage(cgImage: cg)
+                    let (cg, _) = try await gen.image(at: times[i])
+                    thumbnails[i] = Self.small(cg)
                 } catch {
                     lastError = error
                 }
             }
-            if !thumbnails.contains(where: { $0 == nil }) { break }
         }
+
         if thumbnails.allSatisfy({ $0 == nil }) {
             thumbnailError = "Couldn't load previews: \(lastError?.localizedDescription ?? "unknown error")"
+        }
+    }
+
+    /// Scales a frame down to about 240 points tall for the strip.
+    private static func small(_ cg: CGImage) -> UIImage {
+        let full = UIImage(cgImage: cg)
+        let scale = min(1, 240 / max(full.size.height, 1))
+        let size = CGSize(width: full.size.width * scale, height: full.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            full.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 
