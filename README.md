@@ -19,6 +19,7 @@ The editor has a big preview on top and four tools along the bottom (Trim, Crop,
 **Crop**
 - Original, 1:1, 3:2, 16:9, 4:5 or 9:16.
 - Drag the preview to move the crop and pinch to zoom, or use the **Zoom** (− / + / Reset) and **Move** (arrow) buttons. Arrows grey out when there's nowhere to move.
+- Centering guides show while you adjust the crop: an up-and-down and a side-to-side line through the middle, black, turning yellow when the crop is centered that way. Dragging near center snaps onto it with a light haptic tap.
 
 **Loop**
 - Loop style: Normal, Reverse or Boomerang. Reverse and Boomerang previews are prepared ahead of time (a "Preparing preview…" label shows for a moment), so they play smoothly and match the GIF.

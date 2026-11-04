@@ -678,6 +678,7 @@ final class EditorModel: ObservableObject {
     func zoom(by factor: CGFloat) {
         zoom = min(max(zoom * factor, 1), 4)
         normalizeCenter()
+        showGuides()
     }
 
     /// Tap alternative to dragging: moves the crop by a tenth of its size.
@@ -685,6 +686,30 @@ final class EditorModel: ObservableObject {
         let r = cropRect
         center = CGPoint(x: r.midX + dx * r.width / 10, y: r.midY + dy * r.height / 10)
         normalizeCenter()
+        showGuides()
+    }
+
+    // MARK: Centering guides
+
+    /// Whether the crop can move left/right or up/down at all.
+    var canMoveX: Bool { cropRect.width < videoSize.width - 0.5 }
+    var canMoveY: Bool { cropRect.height < videoSize.height - 0.5 }
+    /// Whether the crop is centered left-to-right / top-to-bottom.
+    var isCenteredX: Bool { abs(cropRect.midX - videoSize.width / 2) < 0.75 }
+    var isCenteredY: Bool { abs(cropRect.midY - videoSize.height / 2) < 0.75 }
+
+    /// Guides show while adjusting the crop, and for a moment after a button tap.
+    @Published var guidesVisible = false
+    private var guidesHideTask: Task<Void, Never>?
+
+    func showGuides(hideAfter seconds: Double? = 1.0) {
+        guidesHideTask?.cancel()
+        guidesVisible = true
+        guard let seconds else { return }
+        guidesHideTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if !Task.isCancelled { guidesVisible = false }
+        }
     }
 
     // Whether the crop has room to move in each direction (for greying out the arrows).
@@ -696,6 +721,7 @@ final class EditorModel: ObservableObject {
     func resetCrop() {
         zoom = 1
         center = CGPoint(x: videoSize.width / 2, y: videoSize.height / 2)
+        showGuides()
     }
 
     // MARK: Output info
