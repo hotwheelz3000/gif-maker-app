@@ -1,20 +1,53 @@
 # GIF Maker
 
-An iPhone app that turns videos into GIFs. Built with [xtool](https://xtool.sh) from the my-ios-app template.
+An iPhone app that turns videos into GIFs. Built with [xtool](https://xtool.sh) from the my-ios-app template, so no Mac or Xcode is needed: GitHub Actions builds the IPA.
 
 ## Features
 
-- Choose a video from Photos
-- Trim with a thumbnail timeline (clips up to 15 seconds)
-- Crop to Original, 1:1, 3:2, 16:9, 4:5 or 9:16; drag to move, pinch to zoom
-- Loop style: Normal, Reverse or Boomerang
-- Speed: 0.5x, 1x, 1.5x or 2x
-- Width 320, 480 or 720 (default 720); 10, 14, 15 or 24 fps (default 15)
-- Save to Photos, share, or copy the GIF
-- Accessibility: 44-point targets, VoiceOver labels and adjustable trim handles, tap buttons for every drag or pinch, Reduce Motion respected
+**Choose a video** from Photos. Everything runs on the phone. There's no server and no account.
 
-Everything runs on the phone. There's no server and no account.
+The editor has a big preview on top and four tools along the bottom (Trim, Crop, Loop, Quality). **Next** in the top-right corner makes the GIF.
+
+**Trim**
+- Thumbnail strip with yellow start and end handles. A clip can be 0.3 to 15 seconds long; a new video starts with its first 5 seconds selected.
+- On videos longer than 30 seconds the strip zooms in to 30 seconds around the selection, with a thin line underneath showing where you are in the whole video.
+- Drag a handle, or drag inside the selection to slide it. A bubble above shows the length, or the handle's time while dragging. A light tap of haptics when the clip hits its shortest or longest length.
+- **Start** and **End** + / − buttons move a handle by 0.1 seconds; hold one down to keep going.
+
+**Crop**
+- Original, 1:1, 3:2, 16:9, 4:5 or 9:16.
+- Drag the preview to move the crop and pinch to zoom, or use the **Zoom** (− / + / Reset) and **Move** (arrow) buttons. Arrows grey out when there's nowhere to move.
+
+**Loop**
+- Loop style: Normal, Reverse or Boomerang. Reverse and Boomerang previews are prepared ahead of time (a "Preparing preview…" label shows for a moment), so they play smoothly and match the GIF.
+- Speed: 0.5x, 1x, 1.5x or 2x.
+
+**Quality**
+- Width 320, 480 or 720 pixels (default 720) and 10, 14, 15 or 24 frames per second (default 15), each with a short explanation. The output size and frame count are shown underneath.
+
+**Your GIF**
+- The GIF plays on a loop, with its loop style, size, frame count and file size.
+- Save to Photos, Share, or Copy.
+
+**Accessibility** (the same standard as Soulection Radio)
+- 44-point tap targets, VoiceOver labels everywhere, and VoiceOver hears the current tool's name at the top.
+- Trim handles and the selection are adjustable with VoiceOver (swipe up or down).
+- A tap alternative for every drag or pinch.
+- Reduce Motion turns off the trim bubble's animation.
+
+**Also**
+- Swipe-back is off; use the ‹ button at the top left to go back.
+- Copied videos and made GIFs are kept in the app's temporary folder and cleared each time the app starts (save or share a GIF to keep it).
+- The Home screen shows the version ("Version 1.0").
 
 ## Download
 
-Every push to `main` builds an unsigned IPA and publishes it on the **Releases** page as `GIFMaker-<date>.ipa`. Sign it when installing (Signulous, Sideloadly, AltStore or `xtool install`).
+Every push to `main` builds an unsigned IPA and publishes it as the **latest** release, titled with the version ("GIF Maker 1.0"), with the IPA named `GIFMaker-<version>.ipa` and the release notes taken from `RELEASE_NOTES.md`. Sign it when installing (Signulous, Sideloadly, AltStore or `xtool install`).
+
+The version is `CFBundleShortVersionString` in `GIFMaker-Info.plist`.
+
+## Project
+
+- `Sources/GIFMaker/`: the app (SwiftUI). `EditorModel.swift` holds the editor's state and playback, `GIFExporter.swift` makes the GIF, `TrimBar.swift` the trim strip.
+- `.github/workflows/build-ipa.yml`: builds the IPA with xtool and publishes the release.
+- `.claude/skills/`: `using-xtool`, plus the `fresh-eyes-review` and `documentation-audit` review skills from Soulection Radio (versions recorded in `skills-lock.json`).

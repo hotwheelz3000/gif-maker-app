@@ -13,16 +13,10 @@ enum Theme {
     static let secondaryText = Color(white: 0.7)
 
     static let gradient = LinearGradient(colors: [purple, pink], startPoint: .leading, endPoint: .trailing)
+    /// Used for the Home screen icon.
     static let rainbow = LinearGradient(
         colors: [green, blue, purple, pink, yellow], startPoint: .leading, endPoint: .trailing
     )
-}
-
-/// Thin rainbow stripe used as a divider.
-struct RainbowStripe: View {
-    var body: some View {
-        Theme.rainbow.frame(height: 3).accessibilityHidden(true)
-    }
 }
 
 /// Big pill button: gradient when prominent, dark grey otherwise.

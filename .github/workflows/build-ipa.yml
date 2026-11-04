@@ -43,10 +43,38 @@ jobs:
           xtool --help
           xtool dev build --help
 
+      # The version comes from CFBundleShortVersionString in the Info.plist named by
+      # infoPath in xtool.yml, and is shown on the Home screen as "Version 1.0".
+      - name: Stamp build info
+        id: info
+        env:
+          APP_NAME: ${{ steps.app.outputs.name }}
+        run: |
+          plist=$(awk -F': *' '$1 == "infoPath" { print $2 }' xtool.yml | tr -d "\"' \r")
+          version=$(plutil -extract CFBundleShortVersionString raw "$plist" 2>/dev/null || echo "")
+          label="Version ${version:-unknown}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          cat > "Sources/$APP_NAME/BuildInfo.swift" <<SWIFT
+          /// Written by the Build IPA workflow.
+          enum BuildInfo {
+              static let label = "$label"
+          }
+          SWIFT
+          cat "Sources/$APP_NAME/BuildInfo.swift"
+
       # Builds for arm64-apple-ios (the default triple). Without --sign the
       # app is left unsigned; --ipa zips it into Payload/ as xtool/<App>.ipa.
+      # Compiler errors are also reported as annotations, so they show up on the
+      # run's summary page without opening the full log.
       - name: Build unsigned IPA
-        run: xtool dev build --ipa
+        run: |
+          set -o pipefail
+          if ! xtool dev build --ipa 2>&1 | tee build.log; then
+            grep -E "error:" build.log | sort -u | head -20 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          fi
 
       - name: Package IPA manually if needed
         env:
@@ -61,26 +89,47 @@ jobs:
           fi
           ls -la xtool
 
+      # Makes a copy named with the app's version (GIFMaker-1.0.ipa; the build time if
+      # there's no version). That copy is what the release and Actions download hold.
+      - name: Name IPA with version
+        id: stamp
+        env:
+          APP_NAME: ${{ steps.app.outputs.name }}
+          version: ${{ steps.info.outputs.version }}
+        run: |
+          stamp=$(TZ=America/Los_Angeles date '+%Y%m%d-%H%M')
+          file="$APP_NAME-${version:-$stamp}"
+          cp -p "xtool/$APP_NAME.ipa" "xtool/$file.ipa"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "label=$(TZ=America/Los_Angeles date '+%b %-d, %Y %-I:%M %p')" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.app.outputs.name }}-ipa
-          path: xtool/${{ steps.app.outputs.name }}.ipa
+          name: ${{ steps.stamp.outputs.file }}
+          path: xtool/${{ steps.stamp.outputs.file }}.ipa
           if-no-files-found: error
 
-      # Publishes the build as the "latest" release with a dated IPA name,
-      # so it can be downloaded from the repo's Releases page.
-      - name: Publish release
+      # Every build of main is also published as the "latest" GitHub Release, so the IPA
+      # can be downloaded from a plain link. The title carries the app's version
+      # ("GIF Maker 1.0"); the notes come from RELEASE_NOTES.md plus the build time.
+      - name: Publish as latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-          APP_NAME: ${{ steps.app.outputs.name }}
+          file: ${{ steps.stamp.outputs.file }}
+          label: ${{ steps.stamp.outputs.label }}
+          version: ${{ steps.info.outputs.version }}
         run: |
-          stamp=$(TZ=America/Los_Angeles date +%Y%m%d-%H%M)
-          ipa="$APP_NAME-$stamp.ipa"
-          cp "xtool/$APP_NAME.ipa" "$ipa"
-          gh release delete latest --cleanup-tag -y || true
+          title="GIF Maker${version:+ $version}"
+          {
+            if [ -f RELEASE_NOTES.md ]; then cat RELEASE_NOTES.md; echo; fi
+            echo "Built from ${GITHUB_SHA::7} on $label (Los Angeles time). Download $file.ipa below and sign it when installing."
+          } > release-notes.txt
+          gh release delete latest --yes --cleanup-tag || true
           sleep 3
-          gh release create latest "$ipa" \
+          gh release create latest "xtool/$file.ipa" \
             --target "$GITHUB_SHA" \
-            --title "$APP_NAME $stamp" \
-            --notes "Unsigned build of ${GITHUB_SHA::7}. Sign it when installing." \
+            --title "$title" \
+            --notes-file release-notes.txt \
             --latest
+          gh release edit latest --draft=false

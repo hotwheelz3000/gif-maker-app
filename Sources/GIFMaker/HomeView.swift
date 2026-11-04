@@ -58,6 +58,10 @@ struct HomeView: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(Color(red: 1, green: 0.45, blue: 0.45))
                     }
+
+                    Text(BuildInfo.label)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Theme.secondaryText)
                 }
                 .padding(24)
             }

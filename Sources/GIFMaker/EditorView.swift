@@ -292,12 +292,15 @@ struct EditorView: View {
     }
 
     /// "Start ........ [+]  [−]" — 44-point buttons that move a handle by 0.1 s.
+    /// Hold one down to keep moving (repeats, speeding up the longer it's held).
     private func nudgeRow(title: String, plus: @escaping () -> Void, minus: @escaping () -> Void) -> some View {
         HStack(spacing: 16) {
             Text(title).font(.subheadline.weight(.bold)).accessibilityHidden(true)
             Spacer()
             iconButton("plus", label: "\(title) later by a tenth of a second", action: plus)
+                .buttonRepeatBehavior(.enabled)
             iconButton("minus", label: "\(title) earlier by a tenth of a second", action: minus)
+                .buttonRepeatBehavior(.enabled)
         }
     }
 

@@ -93,9 +93,8 @@ enum GIFExporter {
 
         // 3. Write the GIF.
         let outURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GIF-\(Int(Date().timeIntervalSince1970))")
+            .appendingPathComponent("GIF-\(UUID().uuidString)")
             .appendingPathExtension("gif")
-        try? FileManager.default.removeItem(at: outURL)
         guard let dest = CGImageDestinationCreateWithURL(
             outURL as CFURL, UTType.gif.identifier as CFString, order.count, nil
         ) else { throw GIFExportError.writeFailed }

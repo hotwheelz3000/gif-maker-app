@@ -56,8 +56,12 @@ final class EditorModel: ObservableObject {
     @Published var loadError: String?
     @Published var duration: Double = 0
     @Published var videoSize: CGSize = .zero
+    // Trim-bar previews (nil = not loaded yet). The version lets the strip redraw only
+    // when a picture changes.
     @Published var thumbnails: [UIImage?] = [] { didSet { thumbnailsVersion &+= 1 } }
     private(set) var thumbnailsVersion = 0
+    @Published var isLoadingThumbnails = false
+    @Published var thumbnailError: String?
     /// Number of previews across the whole video (more for long videos, so the
     /// zoomed-in strip still has enough pictures).
     var thumbnailCount: Int {
@@ -80,6 +84,7 @@ final class EditorModel: ObservableObject {
     func keepSelectionVisible() {
         if start < windowStart - 0.001 || end > windowStart + windowLength + 0.001 { recenterWindow() }
     }
+
     /// Playhead time lives in its own small object so updating it 30 times a second
     /// only redraws the playhead, not the whole editor.
     let clock = PlaybackClock()
@@ -87,6 +92,8 @@ final class EditorModel: ObservableObject {
         get { clock.time }
         set { if clock.time != newValue { clock.time = newValue } }
     }
+    /// Whether the video player can play this video backwards (only used as a fallback
+    /// if the frame preview below can't read the clip).
     @Published var canReverse = false
 
     // Trim
@@ -183,6 +190,10 @@ final class EditorModel: ObservableObject {
             let rect = CGRect(origin: .zero, size: natural).applying(transform)
             videoSize = CGSize(width: abs(rect.width).rounded(), height: abs(rect.height).rounded())
             duration = d.isFinite ? d : 0
+            guard duration >= Self.minClip else {
+                loadError = "This video is too short to make a GIF."
+                return
+            }
             start = 0
             end = min(duration, 5)
             recenterWindow()
@@ -196,9 +207,6 @@ final class EditorModel: ObservableObject {
             loadError = "Couldn't read this video: \(error.localizedDescription)"
         }
     }
-
-    @Published var isLoadingThumbnails = false
-    @Published var thumbnailError: String?
 
     /// Loads the trim-bar previews into fixed slots, the same way the GIF export reads
     /// frames (one batch request), then retries any misses one at a time.
@@ -271,8 +279,9 @@ final class EditorModel: ObservableObject {
 
     // MARK: Playback (loops the trimmed range in the chosen loop style)
 
-    /// True when the preview can actually play backwards for this video.
-    var previewShowsLoopMode: Bool { loopMode == .normal || canReverse }
+    /// False only when neither the frame preview nor the video player can show this
+    /// loop style (the GIF itself is still made correctly).
+    var previewShowsLoopMode: Bool { loopMode == .normal || !framePreviewFailed || canReverse }
 
     private var reverseRate: Float {
         guard let item = player.currentItem else { return -1 }
@@ -367,6 +376,10 @@ final class EditorModel: ObservableObject {
     func pause() {
         isActive = false
         player.pause()
+        if isPreparingPreview {
+            previewTask?.cancel()
+            isPreparingPreview = false
+        }
     }
 
     // MARK: Frame preview
@@ -493,8 +506,10 @@ final class EditorModel: ObservableObject {
     func moveSelection(start newStart: Double) {
         let len = end - start
         let s = min(max(0, newStart), max(0, duration - len))
-        start = s
-        end = s + len
+        if start != s {
+            start = s
+            end = s + len
+        }
     }
 
     func nudgeStart(_ delta: Double) {
@@ -586,11 +601,7 @@ final class EditorModel: ObservableObject {
         isExporting = true
         progress = 0
         exportError = nil
-        pause()
-        // Free the video decoder for the export.
-        previewTask?.cancel()
-        isPreparingPreview = false
-        previewKey = previewFrames.isEmpty ? "" : previewKey
+        pause()   // also stops any frame preview being prepared, freeing the decoder
         let settings = GIFSettings(
             videoURL: url, start: start, end: end, crop: cropRect, videoSize: videoSize,
             outputSize: outputSize, fps: fps, speed: speed, loopMode: loopMode

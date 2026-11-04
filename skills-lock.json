@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "documentation-audit": {
+      "source": "2389-research/documentation-audit",
+      "sourceType": "github",
+      "skillPath": "skills/SKILL.md",
+      "computedHash": "19e42a78dcfc2adcf0ed9cba69967f573a184f45e7fc69e17192c7814db0bd8c"
+    },
+    "fresh-eyes-review": {
+      "source": "2389-research/fresh-eyes-review",
+      "sourceType": "github",
+      "skillPath": "skills/SKILL.md",
+      "computedHash": "fbcedff18e1373b299d4a5650bb03f6d9dcc9feeabdc83bc23896c4af3a55946"
+    }
+  }
+}

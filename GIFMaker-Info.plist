@@ -4,6 +4,10 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>GIF Maker</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>GIF Maker opens videos from your library to turn into GIFs.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

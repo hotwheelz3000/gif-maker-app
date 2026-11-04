@@ -4,8 +4,9 @@ import UIKit
 /// Trim strip with start and end handles.
 /// - Shows at most 30 seconds at once (zoomed in around the selection on long videos);
 ///   a thin overview line underneath shows where that window sits in the whole video.
-/// - Handles move by how far you drag (no jump), have 44-point grab areas, and take
-///   priority over page scrolling.
+/// - Handles move by how far you drag (no jump), measured against the screen rather
+///   than the moving handle (measuring against the handle made it wobble), have
+///   44-point grab areas, and take priority over page scrolling.
 /// - Dragging inside the selection slides the whole window (keeps its length).
 /// - A light tap of haptics when the clip hits its shortest or longest length.
 /// - VoiceOver: each handle and the selection are adjustable (swipe up / down).
