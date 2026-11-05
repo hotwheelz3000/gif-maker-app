@@ -35,32 +35,103 @@ enum GIFExporter {
     /// Makes the GIF: reads frames from the trimmed range (from the video, or straight
     /// from the GIF being edited), crops and scales them, puts them in loop order and
     /// writes an endlessly looping GIF. Progress goes 0...1 (reading is the first 70%).
+    /// Largest GIF the app makes.
+    static let maxBytes = 5 * 1024 * 1024
+    /// Narrowest it shrinks to before dropping frames instead.
+    static let minShrinkWidth: CGFloat = 320
+
     static func make(
         _ s: GIFSettings,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> GIFResult {
-        let frames: [Data]
-        let delays: [Double]
+        var frames: [Data]
+        var delays: [Double]
         if let gifURL = s.gifURL {
             (frames, delays) = try readGIFFrames(gifURL, s, progress: progress)
         } else {
             (frames, delays) = try await readVideoFrames(s, progress: progress)
         }
         guard !frames.isEmpty else { throw GIFExportError.noFrames }
+        let keepAlpha = s.gifURL != nil   // GIF frames are PNGs (may be transparent)
 
-        // Loop order.
-        let order: [Int]
-        switch s.loopMode {
-        case .normal:
-            order = Array(frames.indices)
-        case .reverse:
-            order = Array(frames.indices.reversed())
-        case .boomerang:
-            let back = frames.count > 2 ? Array((1..<(frames.count - 1)).reversed()) : []
-            order = Array(frames.indices) + back
+        var size = s.outputSize
+        var (url, bytes) = try write(frames: frames, delays: delays, loopMode: s.loopMode) { p in
+            progress(0.7 + 0.15 * p)
         }
 
-        // Write the GIF.
+        // Keep GIFs at 5 MB or under: shrink the size first, then (below 320 wide) drop
+        // every other frame, each kept frame showing twice as long so the speed stays.
+        var note: String?
+        var attempt = 0
+        var anyDropped = false
+        while bytes > maxBytes && attempt < 5 {
+            try Task.checkCancellation()
+            attempt += 1
+            // File size grows roughly with the pixel count, so scale by the square root.
+            let factor = sqrt(Double(maxBytes) * 0.9 / Double(bytes))
+            var newWidth = (size.width * CGFloat(factor)).rounded(.down)
+            var dropped = false
+            if newWidth < minShrinkWidth {
+                newWidth = min(size.width, minShrinkWidth)
+                if frames.count > 2 {
+                    var keptFrames: [Data] = []
+                    var keptDelays: [Double] = []
+                    for i in stride(from: 0, to: frames.count, by: 2) {
+                        keptFrames.append(frames[i])
+                        keptDelays.append(delays[i] + (i + 1 < frames.count ? delays[i + 1] : 0))
+                    }
+                    frames = keptFrames
+                    delays = keptDelays
+                    dropped = true
+                    anyDropped = true
+                }
+            }
+            newWidth = max(2, (newWidth / 2).rounded(.down) * 2)
+            if newWidth < size.width {
+                let newHeight = max(2, (newWidth * size.height / size.width / 2).rounded() * 2)
+                let newSize = CGSize(width: newWidth, height: newHeight)
+                frames = frames.compactMap { resize($0, to: newSize, keepAlpha: keepAlpha) }
+                size = newSize
+            } else if !dropped {
+                break   // nothing left to shrink
+            }
+            try? FileManager.default.removeItem(at: url)
+            (url, bytes) = try write(frames: frames, delays: delays, loopMode: s.loopMode) { p in
+                progress(0.85 + 0.15 * (Double(attempt - 1) + p) / 5)
+            }
+            note = "Shrunk to fit 5 MB · \(Int(size.width))×\(Int(size.height))"
+                + (anyDropped ? " · fewer frames" : "")
+        }
+        if bytes > maxBytes {
+            note = "Still over 5 MB. Trim it shorter for a smaller GIF."
+        }
+        progress(1)
+
+        let frameCount = loopOrder(count: frames.count, loopMode: s.loopMode).count
+        return GIFResult(
+            url: url, frameCount: frameCount, pixelSize: size, loopMode: s.loopMode,
+            bytes: bytes, note: note
+        )
+    }
+
+    /// Frame order for a loop style.
+    static func loopOrder(count: Int, loopMode: LoopMode) -> [Int] {
+        switch loopMode {
+        case .normal:
+            return Array(0..<count)
+        case .reverse:
+            return Array((0..<count).reversed())
+        case .boomerang:
+            let back = count > 2 ? Array((1..<(count - 1)).reversed()) : []
+            return Array(0..<count) + back
+        }
+    }
+
+    /// Writes an endlessly looping GIF to a new temp file; returns it and its size.
+    private static func write(
+        frames: [Data], delays: [Double], loopMode: LoopMode, progress: (Double) -> Void
+    ) throws -> (URL, Int) {
+        let order = loopOrder(count: frames.count, loopMode: loopMode)
         let outURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("GIF-\(UUID().uuidString)")
             .appendingPathExtension("gif")
@@ -87,12 +158,24 @@ enum GIFExporter {
                let image = CGImageSourceCreateImageAtIndex(src, 0, nil) {
                 CGImageDestinationAddImage(dest, image, frameProps as CFDictionary)
             }
-            progress(0.7 + 0.3 * Double(n + 1) / Double(order.count))
+            progress(Double(n + 1) / Double(order.count))
         }
         guard CGImageDestinationFinalize(dest) else { throw GIFExportError.writeFailed }
-
         let bytes = (try? FileManager.default.attributesOfItem(atPath: outURL.path)[.size] as? Int) ?? 0
-        return GIFResult(url: outURL, frameCount: order.count, pixelSize: s.outputSize, loopMode: s.loopMode, bytes: bytes)
+        return (outURL, bytes)
+    }
+
+    /// Scales one stored frame (JPEG, or PNG when it may be transparent) to a new size.
+    private static func resize(_ data: Data, to size: CGSize, keepAlpha: Bool) -> Data? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(src, 0, nil),
+              let scaled = render(
+                image, crop: CGRect(x: 0, y: 0, width: image.width, height: image.height),
+                videoSize: CGSize(width: image.width, height: image.height),
+                outSize: size, keepAlpha: keepAlpha
+              )
+        else { return nil }
+        return keepAlpha ? pngData(scaled) : jpegData(scaled)
     }
 
     /// Video: frames at an even rate across the range, kept as JPEGs (in time order).

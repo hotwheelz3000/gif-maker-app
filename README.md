@@ -31,6 +31,7 @@ The editor has a big preview on top and four tools along the bottom (Trim, Crop,
 **Your GIF**
 - The GIF plays on a loop, with its loop style, size, frame count and file size.
 - Save to Photos, Share, or Copy.
+- GIFs are kept at 5 MB or under: if one comes out bigger, it's made smaller automatically (first a smaller size, then below 320 wide every other frame is dropped, keeping the speed), and the screen says so.
 
 **Accessibility** (the same standard as Soulection Radio)
 - 44-point tap targets, VoiceOver labels everywhere, and VoiceOver hears the current tool's name at the top.

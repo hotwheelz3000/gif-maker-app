@@ -38,6 +38,8 @@ struct GIFResult: Identifiable, Hashable {
     let pixelSize: CGSize
     let loopMode: LoopMode
     let bytes: Int
+    /// Set when the GIF was shrunk to stay under 5 MB (or couldn't be).
+    var note: String? = nil
 
     static func == (a: GIFResult, b: GIFResult) -> Bool { a.id == b.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }

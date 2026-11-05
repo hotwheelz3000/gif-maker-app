@@ -245,6 +245,7 @@ struct EditorView: View {
                     + [(10, "10"), (14, "14"), (15, "15"), (24, "24")].map { ($0.0, "\($0.1) fps") },
                 selection: $model.fps
             )
+            panelNote("GIFs are kept at 5 MB or under; big sizes or long clips may be shrunk.")
             let size = model.outputSize
             Text("\(Int(size.width))×\(Int(size.height)) · about \(model.estimatedFrames) frames")
                 .font(.caption.weight(.semibold))

@@ -24,6 +24,13 @@ struct ResultView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.secondaryText)
 
+                    if let note = result.note {
+                        Label(note, systemImage: "arrow.down.right.and.arrow.up.left")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Theme.yellow)
+                            .multilineTextAlignment(.center)
+                    }
+
                     HStack(alignment: .top, spacing: 28) {
                         Button {
                             Task { await save() }
