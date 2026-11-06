@@ -38,8 +38,10 @@ struct GIFResult: Identifiable, Hashable {
     let pixelSize: CGSize
     let loopMode: LoopMode
     let bytes: Int
-    /// Set when the GIF was shrunk to stay under 5 MB (or couldn't be).
+    /// Set when the GIF was shrunk to stay under 5 MB.
     var note: String? = nil
+    /// The full-quality version made before shrinking (only when it was shrunk).
+    var original: OriginalGIF? = nil
 
     static func == (a: GIFResult, b: GIFResult) -> Bool { a.id == b.id }
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
@@ -781,6 +783,16 @@ final class EditorModel: ObservableObject {
     func cancelExport() {
         exportTask?.cancel()
     }
+}
+
+/// The un-shrunk GIF, kept so it can be saved or shared instead of the 5 MB one.
+struct OriginalGIF: Hashable {
+    let url: URL
+    let frameCount: Int
+    let pixelSize: CGSize
+    let bytes: Int
+
+    func hash(into hasher: inout Hasher) { hasher.combine(url) }
 }
 
 /// Holds just the playhead time (see EditorModel.clock).

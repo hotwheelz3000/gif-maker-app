@@ -6,25 +6,45 @@ struct ResultView: View {
     let result: GIFResult
     @State private var status: String?
     @State private var isSaving = false
+    /// When the GIF was shrunk to 5 MB: whether the full-quality original is picked.
+    @State private var useOriginal = false
+
+    // The version that's showing (and that Save, Share and Copy use).
+    private var url: URL { useOriginal ? (result.original?.url ?? result.url) : result.url }
+    private var pixelSize: CGSize { useOriginal ? (result.original?.pixelSize ?? result.pixelSize) : result.pixelSize }
+    private var frameCount: Int { useOriginal ? (result.original?.frameCount ?? result.frameCount) : result.frameCount }
+    private var bytes: Int { useOriginal ? (result.original?.bytes ?? result.bytes) : result.bytes }
 
     var body: some View {
         ZStack {
             Theme.background.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 20) {
-                    GIFPlayerView(url: result.url)
-                        .aspectRatio(result.pixelSize, contentMode: .fit)
+                    GIFPlayerView(url: url)
+                        .id(url)   // restart playback when switching versions
+                        .aspectRatio(pixelSize, contentMode: .fit)
                         .frame(maxWidth: .infinity, maxHeight: 440)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .accessibilityElement()
-                        .accessibilityLabel("Your GIF, \(result.loopMode.rawValue) loop, \(Int(result.pixelSize.width)) by \(Int(result.pixelSize.height))")
+                        .accessibilityLabel("Your GIF, \(result.loopMode.rawValue) loop, \(Int(pixelSize.width)) by \(Int(pixelSize.height))")
                         .accessibilityAddTraits(.isImage)
 
-                    Text("\(result.loopMode.rawValue) · \(Int(result.pixelSize.width))×\(Int(result.pixelSize.height)) · \(result.frameCount) frames · \(ByteCountFormatter.string(fromByteCount: Int64(result.bytes), countStyle: .file))")
+                    Text("\(result.loopMode.rawValue) · \(Int(pixelSize.width))×\(Int(pixelSize.height)) · \(frameCount) frames · \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Theme.secondaryText)
 
-                    if let note = result.note {
+                    if let original = result.original {
+                        ChipPicker(
+                            title: "Version",
+                            options: [
+                                (false, "5 MB"),
+                                (true, "Original · " + ByteCountFormatter.string(fromByteCount: Int64(original.bytes), countStyle: .file)),
+                            ],
+                            selection: $useOriginal
+                        )
+                    }
+
+                    if !useOriginal, let note = result.note {
                         Label(note, systemImage: "arrow.down.right.and.arrow.up.left")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(Theme.yellow)
@@ -41,7 +61,7 @@ struct ResultView: View {
                         .disabled(isSaving)
                         .accessibilityLabel("Save to Photos")
 
-                        ShareLink(item: result.url) {
+                        ShareLink(item: url) {
                             roundAction("square.and.arrow.up", title: "Share", prominent: false)
                         }
                         .buttonStyle(.plain)
@@ -101,7 +121,7 @@ struct ResultView: View {
             status = "Allow Photos access in Settings to save GIFs."
             return
         }
-        let url = result.url
+        let url = self.url
         do {
             try await PHPhotoLibrary.shared().performChanges {
                 let request = PHAssetCreationRequest.forAsset()
@@ -114,7 +134,7 @@ struct ResultView: View {
     }
 
     private func copy() {
-        guard let data = try? Data(contentsOf: result.url) else {
+        guard let data = try? Data(contentsOf: url) else {
             status = "Couldn't copy the GIF."
             return
         }

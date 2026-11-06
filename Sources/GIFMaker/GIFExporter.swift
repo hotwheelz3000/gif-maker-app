@@ -62,14 +62,21 @@ enum GIFExporter {
         // below 200 wide are frames dropped (every other one, each kept frame showing
         // twice as long so the speed stays), then the size search runs again.
         var note: String?
+        var original: OriginalGIF?
         if bytes > maxBytes {
+            // Keep the full-quality version so it can still be saved.
+            original = OriginalGIF(
+                url: url,
+                frameCount: loopOrder(count: frames.count, loopMode: s.loopMode).count,
+                pixelSize: size,
+                bytes: bytes
+            )
             var baseFrames = frames
             var baseDelays = delays
             var hintBytes = bytes          // size of the GIF at full width with these frames
             var anyDropped = false
             var chosen: (url: URL, bytes: Int, size: CGSize)?
             var round = 0
-            try? FileManager.default.removeItem(at: url)
 
             while chosen == nil {
                 try Task.checkCancellation()
@@ -103,6 +110,7 @@ enum GIFExporter {
                 note = "Shrunk to fit 5 MB · \(Int(size.width))×\(Int(size.height))"
                     + (anyDropped ? " · fewer frames" : "")
             } else {
+                try? FileManager.default.removeItem(at: url)
                 throw GIFExportError.writeFailed
             }
         }
@@ -111,7 +119,7 @@ enum GIFExporter {
         let frameCount = loopOrder(count: frames.count, loopMode: s.loopMode).count
         return GIFResult(
             url: url, frameCount: frameCount, pixelSize: size, loopMode: s.loopMode,
-            bytes: bytes, note: note
+            bytes: bytes, note: note, original: original
         )
     }
 
