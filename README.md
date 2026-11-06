@@ -46,7 +46,7 @@ The editor has a big preview on top and four tools along the bottom (Trim, Crop,
 
 ## Download
 
-Every push to `main` builds an unsigned IPA and publishes it as the **latest** release, titled with the version ("GIF Maker 1.1"), with the IPA named `GIFMaker-<version>.ipa` and the release notes taken from `RELEASE_NOTES.md`. Sign it when installing (Signulous, Sideloadly, AltStore or `xtool install`).
+Every push to `main` builds an unsigned IPA and publishes it as the **latest** release, titled with the version ("GIF Maker 1.1"), with the IPA named `GIFMaker-<version>-<date>-<time>.ipa` (Los Angeles time, so every download has its own name) and the release notes taken from `RELEASE_NOTES.md`. Sign it when installing (Signulous, Sideloadly, AltStore or `xtool install`).
 
 The version is `CFBundleShortVersionString` in `GIFMaker-Info.plist`.
 

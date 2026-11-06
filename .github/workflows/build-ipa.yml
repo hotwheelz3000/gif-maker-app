@@ -89,8 +89,9 @@ jobs:
           fi
           ls -la xtool
 
-      # Makes a copy named with the app's version (GIFMaker-1.0.ipa; the build time if
-      # there's no version). That copy is what the release and Actions download hold.
+      # Makes a copy named with the app's version and the build's date and time
+      # (GIFMaker-1.1-20261106-0315.ipa), so every download has its own name.
+      # That copy is what the release and Actions download hold.
       - name: Name IPA with version
         id: stamp
         env:
@@ -98,7 +99,7 @@ jobs:
           version: ${{ steps.info.outputs.version }}
         run: |
           stamp=$(TZ=America/Los_Angeles date '+%Y%m%d-%H%M')
-          file="$APP_NAME-${version:-$stamp}"
+          file="$APP_NAME${version:+-$version}-$stamp"
           cp -p "xtool/$APP_NAME.ipa" "xtool/$file.ipa"
           echo "file=$file" >> "$GITHUB_OUTPUT"
           echo "label=$(TZ=America/Los_Angeles date '+%b %-d, %Y %-I:%M %p')" >> "$GITHUB_OUTPUT"
