@@ -37,8 +37,6 @@ enum GIFExporter {
     /// writes an endlessly looping GIF. Progress goes 0...1 (reading is the first 70%).
     /// Largest GIF the app makes.
     static let maxBytes = 5 * 1024 * 1024
-    /// Narrowest it shrinks to before dropping frames instead.
-    static let minShrinkWidth: CGFloat = 320
 
     static func make(
         _ s: GIFSettings,
@@ -59,50 +57,54 @@ enum GIFExporter {
             progress(0.7 + 0.15 * p)
         }
 
-        // Keep every GIF at 5 MB or under. Keep shrinking until it fits: the size first,
-        // then (below 320 wide) drop every other frame, each kept frame showing twice as
-        // long so the speed stays. With only a couple of frames left, go below 320 too.
+        // Keep every GIF at 5 MB or under, using as much of the 5 MB as possible:
+        // keep all frames and find the biggest size that fits. Only if it would have to go
+        // below 200 wide are frames dropped (every other one, each kept frame showing
+        // twice as long so the speed stays), then the size search runs again.
         var note: String?
-        var attempt = 0
-        var anyDropped = false
-        while bytes > maxBytes {
-            try Task.checkCancellation()
-            attempt += 1
-            // File size grows roughly with the pixel count, so scale by the square root.
-            let factor = sqrt(Double(maxBytes) * 0.9 / Double(bytes))
-            var newWidth = (size.width * CGFloat(factor)).rounded(.down)
-            var dropped = false
-            if newWidth < minShrinkWidth && frames.count > 2 {
-                newWidth = min(size.width, minShrinkWidth)
-                var keptFrames: [Data] = []
-                var keptDelays: [Double] = []
-                for i in stride(from: 0, to: frames.count, by: 2) {
-                    keptFrames.append(frames[i])
-                    keptDelays.append(delays[i] + (i + 1 < frames.count ? delays[i + 1] : 0))
-                }
-                frames = keptFrames
-                delays = keptDelays
-                dropped = true
-                anyDropped = true
-            }
-            // Always make progress: if nothing else changed, shrink by at least 20%.
-            if !dropped && newWidth >= size.width { newWidth = (size.width * 0.8).rounded(.down) }
-            newWidth = max(16, (newWidth / 2).rounded(.down) * 2)
-            if newWidth < size.width {
-                let newHeight = max(2, (newWidth * size.height / size.width / 2).rounded() * 2)
-                let newSize = CGSize(width: newWidth, height: newHeight)
-                frames = frames.compactMap { resize($0, to: newSize, keepAlpha: keepAlpha) }
-                size = newSize
-            } else if !dropped {
-                break   // already as small as it goes (never happens in practice)
-            }
+        if bytes > maxBytes {
+            var baseFrames = frames
+            var baseDelays = delays
+            var hintBytes = bytes          // size of the GIF at full width with these frames
+            var anyDropped = false
+            var chosen: (url: URL, bytes: Int, size: CGSize)?
+            var round = 0
             try? FileManager.default.removeItem(at: url)
-            let round = Double(min(attempt, 9))
-            (url, bytes) = try write(frames: frames, delays: delays, loopMode: s.loopMode) { p in
-                progress(0.85 + 0.15 * (round - 1 + p) / 10)
+
+            while chosen == nil {
+                try Task.checkCancellation()
+                let canDrop = baseFrames.count > 2
+                chosen = try fitWidth(
+                    frames: baseFrames, delays: baseDelays, baseSize: size, startBytes: hintBytes,
+                    minWidth: canDrop ? 200 : 16, keepAlpha: keepAlpha, loopMode: s.loopMode
+                ) { p in
+                    progress(0.85 + 0.15 * min(Double(round) + p, 4) / 4)
+                }
+                if chosen == nil {
+                    guard canDrop else { break }
+                    var keptFrames: [Data] = []
+                    var keptDelays: [Double] = []
+                    for i in stride(from: 0, to: baseFrames.count, by: 2) {
+                        keptFrames.append(baseFrames[i])
+                        keptDelays.append(baseDelays[i] + (i + 1 < baseFrames.count ? baseDelays[i + 1] : 0))
+                    }
+                    hintBytes = hintBytes * keptFrames.count / max(baseFrames.count, 1)
+                    baseFrames = keptFrames
+                    baseDelays = keptDelays
+                    anyDropped = true
+                    round += 1
+                }
             }
-            note = "Shrunk to fit 5 MB · \(Int(size.width))×\(Int(size.height))"
-                + (anyDropped ? " · fewer frames" : "")
+            if let chosen {
+                url = chosen.url
+                bytes = chosen.bytes
+                size = chosen.size
+                frames = baseFrames
+                note = "Shrunk to fit 5 MB · \(Int(size.width))×\(Int(size.height))"
+                    + (anyDropped ? " · fewer frames" : "")
+            } else {
+                throw GIFExportError.writeFailed
+            }
         }
         progress(1)
 
@@ -124,6 +126,52 @@ enum GIFExporter {
             let back = count > 2 ? Array((1..<(count - 1)).reversed()) : []
             return Array(0..<count) + back
         }
+    }
+
+    /// Finds the biggest width (down to minWidth) whose GIF fits in 5 MB, aiming for just
+    /// under 5 MB. Each try is made from the full-size frames, so quality isn't lost by
+    /// shrinking twice. Returns nil if even minWidth is too big.
+    private static func fitWidth(
+        frames: [Data], delays: [Double], baseSize: CGSize, startBytes: Int,
+        minWidth: CGFloat, keepAlpha: Bool, loopMode: LoopMode,
+        progress: (Double) -> Void
+    ) throws -> (url: URL, bytes: Int, size: CGSize)? {
+        let even: (CGFloat) -> CGFloat = { max(2, ($0 / 2).rounded(.down) * 2) }
+        var tooBig = baseSize.width             // smallest width known to be too big
+        var best: (url: URL, bytes: Int, size: CGSize)?
+        // First guess from the size at full width (file size grows with the pixel count).
+        var guess = even(baseSize.width * CGFloat(sqrt(Double(maxBytes) * 0.95 / Double(max(startBytes, 1)))))
+        var tries = 0
+        while tries < 7 {
+            tries += 1
+            try Task.checkCancellation()
+            guess = min(guess, tooBig - 2)
+            if guess < minWidth {
+                // Too small: either try exactly minWidth once, or give up.
+                if best == nil && tooBig > minWidth { guess = even(minWidth) } else { break }
+            }
+            let newSize = CGSize(width: guess, height: max(2, even(guess * baseSize.height / baseSize.width)))
+            let resized = frames.compactMap { resize($0, to: newSize, keepAlpha: keepAlpha) }
+            let (url, bytes) = try write(frames: resized, delays: delays, loopMode: loopMode) { p in
+                progress((Double(tries - 1) + p) / 7)
+            }
+            if bytes <= maxBytes {
+                if let old = best { try? FileManager.default.removeItem(at: old.url) }
+                best = (url, bytes, newSize)
+                // Close enough to 5 MB, or no room left to grow: done.
+                if Double(bytes) >= Double(maxBytes) * 0.9 || tooBig - guess <= 8 { break }
+                let up = even(guess * CGFloat(sqrt(Double(maxBytes) * 0.95 / Double(bytes))))
+                guess = min(max(up, guess + 2), (guess + tooBig) / 2 + 1)
+            } else {
+                try? FileManager.default.removeItem(at: url)
+                tooBig = guess
+                if guess <= minWidth { break }
+                let down = even(guess * CGFloat(sqrt(Double(maxBytes) * 0.95 / Double(bytes))))
+                if let b = best { guess = max(down, (b.size.width + guess) / 2) } else { guess = down }
+                if let b = best, tooBig - b.size.width <= 8 { break }
+            }
+        }
+        return best
     }
 
     /// Writes an endlessly looping GIF to a new temp file; returns it and its size.

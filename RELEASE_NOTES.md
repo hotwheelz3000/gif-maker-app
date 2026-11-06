@@ -2,7 +2,7 @@
 
 - **Edit GIFs:** tap **Choose a GIF** (under Choose a Video) to open a GIF from your library and trim, crop, loop, speed it up or resize it with the same tools.
 - **No quality loss:** a GIF's frames are used as they are (no video step), so edits keep the original detail and transparency.
-- **5 MB limit:** every GIF is 5 MB or under. Bigger ones keep shrinking until they fit (smaller size first, then fewer frames below 320 wide, speed unchanged), and Your GIF says what changed.
+- **5 MB limit:** every GIF is 5 MB or under. Bigger ones keep all their frames and get the biggest size that fits, just under 5 MB; frames are only dropped if it would have to go below 200 wide. Your GIF says what changed.
 - **Centering guides:** while you move or zoom the crop, lines through the middle turn from black to yellow when it's centered, and dragging near center snaps onto it with a light tap.
 - **Original size and timing:** for GIFs, Size and Frame rate start on **Original**, keeping the GIF's own size, frames and timing.
 
