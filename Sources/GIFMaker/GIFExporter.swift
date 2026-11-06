@@ -59,51 +59,50 @@ enum GIFExporter {
             progress(0.7 + 0.15 * p)
         }
 
-        // Keep GIFs at 5 MB or under: shrink the size first, then (below 320 wide) drop
-        // every other frame, each kept frame showing twice as long so the speed stays.
+        // Keep every GIF at 5 MB or under. Keep shrinking until it fits: the size first,
+        // then (below 320 wide) drop every other frame, each kept frame showing twice as
+        // long so the speed stays. With only a couple of frames left, go below 320 too.
         var note: String?
         var attempt = 0
         var anyDropped = false
-        while bytes > maxBytes && attempt < 5 {
+        while bytes > maxBytes {
             try Task.checkCancellation()
             attempt += 1
             // File size grows roughly with the pixel count, so scale by the square root.
             let factor = sqrt(Double(maxBytes) * 0.9 / Double(bytes))
             var newWidth = (size.width * CGFloat(factor)).rounded(.down)
             var dropped = false
-            if newWidth < minShrinkWidth {
+            if newWidth < minShrinkWidth && frames.count > 2 {
                 newWidth = min(size.width, minShrinkWidth)
-                if frames.count > 2 {
-                    var keptFrames: [Data] = []
-                    var keptDelays: [Double] = []
-                    for i in stride(from: 0, to: frames.count, by: 2) {
-                        keptFrames.append(frames[i])
-                        keptDelays.append(delays[i] + (i + 1 < frames.count ? delays[i + 1] : 0))
-                    }
-                    frames = keptFrames
-                    delays = keptDelays
-                    dropped = true
-                    anyDropped = true
+                var keptFrames: [Data] = []
+                var keptDelays: [Double] = []
+                for i in stride(from: 0, to: frames.count, by: 2) {
+                    keptFrames.append(frames[i])
+                    keptDelays.append(delays[i] + (i + 1 < frames.count ? delays[i + 1] : 0))
                 }
+                frames = keptFrames
+                delays = keptDelays
+                dropped = true
+                anyDropped = true
             }
-            newWidth = max(2, (newWidth / 2).rounded(.down) * 2)
+            // Always make progress: if nothing else changed, shrink by at least 20%.
+            if !dropped && newWidth >= size.width { newWidth = (size.width * 0.8).rounded(.down) }
+            newWidth = max(16, (newWidth / 2).rounded(.down) * 2)
             if newWidth < size.width {
                 let newHeight = max(2, (newWidth * size.height / size.width / 2).rounded() * 2)
                 let newSize = CGSize(width: newWidth, height: newHeight)
                 frames = frames.compactMap { resize($0, to: newSize, keepAlpha: keepAlpha) }
                 size = newSize
             } else if !dropped {
-                break   // nothing left to shrink
+                break   // already as small as it goes (never happens in practice)
             }
             try? FileManager.default.removeItem(at: url)
+            let round = Double(min(attempt, 9))
             (url, bytes) = try write(frames: frames, delays: delays, loopMode: s.loopMode) { p in
-                progress(0.85 + 0.15 * (Double(attempt - 1) + p) / 5)
+                progress(0.85 + 0.15 * (round - 1 + p) / 10)
             }
             note = "Shrunk to fit 5 MB · \(Int(size.width))×\(Int(size.height))"
                 + (anyDropped ? " · fewer frames" : "")
-        }
-        if bytes > maxBytes {
-            note = "Still over 5 MB. Trim it shorter for a smaller GIF."
         }
         progress(1)
 
