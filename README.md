@@ -56,9 +56,8 @@ The version is `CFBundleShortVersionString` in `GIFMaker-Info.plist`.
 - `.github/workflows/build-ipa.yml`: builds the IPA with xtool and publishes the release.
 - `.claude/skills/`: `using-xtool`, plus the `fresh-eyes-review` and `documentation-audit` review skills from Soulection Radio (versions recorded in `skills-lock.json`).
 
-## Logs and updates
+## Updates
 
-- **Share logs:** shake the phone anywhere in the app to share `app.log`, which includes crashes. Send it along with bug reports.
 - **Update feed:** each release also has `source.json`, an AltStore-format source. Add this URL in a sideloading app that supports sources to see new builds as updates:
 
 ```
