@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct GIFMakerApp: App {
     init() {
+        AppLog.installCrashHandlers()
         Self.clearTemporaryFiles()
     }
 

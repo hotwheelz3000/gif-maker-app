@@ -55,3 +55,12 @@ The version is `CFBundleShortVersionString` in `GIFMaker-Info.plist`.
 - `Sources/GIFMaker/`: the app (SwiftUI). `EditorModel.swift` holds the editor's state and playback, `GIFExporter.swift` makes the GIF, `TrimBar.swift` the trim strip, `GIFSource.swift` reads GIFs for editing.
 - `.github/workflows/build-ipa.yml`: builds the IPA with xtool and publishes the release.
 - `.claude/skills/`: `using-xtool`, plus the `fresh-eyes-review` and `documentation-audit` review skills from Soulection Radio (versions recorded in `skills-lock.json`).
+
+## Logs and updates
+
+- **Share logs:** shake the phone anywhere in the app to share `app.log`, which includes crashes. Send it along with bug reports.
+- **Update feed:** each release also has `source.json`, an AltStore-format source. Add this URL in a sideloading app that supports sources to see new builds as updates:
+
+```
+https://github.com/hotwheelz3000/gif-maker-app/releases/download/latest/source.json
+```

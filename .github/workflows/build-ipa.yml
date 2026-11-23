@@ -8,11 +8,19 @@ on:
 permissions:
   contents: write
 
+env:
+  # Skip Homebrew's slow self-update on every run.
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+
 jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the whole history, to count the builds of this version
 
       # The app name comes from `product:` in xtool.yml, so the IPA and the
       # artifact follow the app automatically after ./rename-app.sh.
@@ -37,6 +45,43 @@ jobs:
           xcrun -sdk iphoneos -show-sdk-path
           swift --version
 
+      # Caches: Homebrew downloads and SwiftPM's .build folder (packages + compiled
+      # code), so later builds only recompile what changed. The Xcode version is in
+      # the key, so a runner update starts a fresh cache.
+      - name: Xcode version for cache
+        id: xcode
+        run: echo "version=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-${{ runner.os }}-${{ hashFiles('.github/workflows/build-ipa.yml') }}
+          restore-keys: brew-${{ runner.os }}-
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ hashFiles('Sources/**') }}
+          restore-keys: |
+            spm-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+            spm-${{ steps.xcode.outputs.version }}-
+
+      # Lint before building. SwiftLint errors (force_try, force_cast) stop the run;
+      # warnings and swift-format style notes show up as annotations on the run page.
+      - name: Lint
+        run: |
+          brew install swiftlint
+          swiftlint lint --reporter github-actions-logging
+          if swift format --version > /dev/null 2>&1; then
+            swift format lint --recursive Sources 2>&1 | while IFS= read -r line; do
+              echo "::notice::$line"
+            done
+          fi
+
       - name: Install xtool
         run: |
           brew install xtool-org/tap/xtool
@@ -52,8 +97,23 @@ jobs:
         run: |
           plist=$(awk -F': *' '$1 == "infoPath" { print $2 }' xtool.yml | tr -d "\"' \r")
           version=$(plutil -extract CFBundleShortVersionString raw "$plist" 2>/dev/null || echo "")
+          # Build number: how many commits in a row (counting this one) have this version.
+          # The first build of a new version is 1 and isn't shown; later ones are
+          # (GIFMaker-1.1-3.ipa, "Version 1.1 (build 3)").
+          ver_at() { git show "$1:$plist" 2>/dev/null | awk '/CFBundleShortVersionString/{getline; gsub(/.*<string>|<\/string>.*/,""); print; exit}'; }
+          build=0
+          if [ -n "$version" ]; then
+            for c in $(git rev-list --first-parent HEAD); do
+              [ "$(ver_at "$c")" = "$version" ] || break
+              build=$((build + 1))
+            done
+          fi
           label="Version ${version:-unknown}"
+          if [ -n "$version" ] && [ "$build" -gt 1 ]; then label="$label (build $build)"; fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+          # The build number is also CFBundleVersion, so sideload sources see each build as an update.
+          if [ -n "$plist" ] && [ "$build" -gt 0 ]; then plutil -replace CFBundleVersion -string "$build" "$plist"; fi
           cat > "Sources/$APP_NAME/BuildInfo.swift" <<SWIFT
           /// Written by the Build IPA workflow.
           enum BuildInfo {
@@ -89,26 +149,81 @@ jobs:
           fi
           ls -la xtool
 
-      # Makes a copy named with the app's version and the build's date and time
-      # (GIFMaker-1.1-20261106-0315.ipa), so every download has its own name.
-      # That copy is what the release and Actions download hold.
+      # Makes a copy named with the app's version, plus the build number after the
+      # first build of a version (GIFMaker-1.1.ipa, then GIFMaker-1.1-2.ipa), so every
+      # download has its own name. That copy is what the release and Actions download hold.
       - name: Name IPA with version
         id: stamp
         env:
           APP_NAME: ${{ steps.app.outputs.name }}
           version: ${{ steps.info.outputs.version }}
+          build: ${{ steps.info.outputs.build }}
         run: |
           stamp=$(TZ=America/Los_Angeles date '+%Y%m%d-%H%M')
-          file="$APP_NAME${version:+-$version}-$stamp"
+          file="$APP_NAME-${version:-$stamp}"
+          if [ -n "$version" ] && [ "${build:-0}" -gt 1 ]; then file="$file-$build"; fi
           cp -p "xtool/$APP_NAME.ipa" "xtool/$file.ipa"
           echo "file=$file" >> "$GITHUB_OUTPUT"
           echo "label=$(TZ=America/Los_Angeles date '+%b %-d, %Y %-I:%M %p')" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.stamp.outputs.file }}
           path: xtool/${{ steps.stamp.outputs.file }}.ipa
           if-no-files-found: error
+
+      # An AltStore-format source (source.json) listing this build, for sideloading
+      # apps that follow a source URL and show updates:
+      #   https://github.com/<owner>/<repo>/releases/download/latest/source.json
+      - name: Write source.json
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          FILE_BASE: ${{ steps.stamp.outputs.file }}
+          version: ${{ steps.info.outputs.version }}
+          build: ${{ steps.info.outputs.build }}
+        run: |
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/latest"
+          plist=$(awk -F': *' '$1 == "infoPath" { print $2 }' xtool.yml | tr -d "\"' \r")
+          product=$(awk -F': *' '$1 == "product" { print $2 }' xtool.yml | tr -d "\"' \r")
+          bundle=$(awk -F': *' '$1 == "bundleID" { print $2 }' xtool.yml | tr -d "\"' \r")
+          display=$(plutil -extract CFBundleDisplayName raw "$plist" 2>/dev/null || echo "$product")
+          icon=""
+          icon_path=$(awk -F': *' '$1 == "iconPath" { print $2 }' xtool.yml | tr -d "\"' \r")
+          if [ -n "$icon_path" ] && [ -f "$icon_path" ]; then
+            cp "$icon_path" xtool/AppIcon.png
+            icon="$base/AppIcon.png"
+          fi
+          notes=""
+          [ -f RELEASE_NOTES.md ] && notes=$(cat RELEASE_NOTES.md)
+          size=$(stat -f%z "xtool/$FILE_BASE.ipa")
+          APP_DISPLAY="$display" BUNDLE="$bundle" python3 - "$base/$FILE_BASE.ipa" "$size" "$icon" "$notes" > xtool/source.json <<'PY'
+          import json, os, sys, datetime
+          url, size, icon, notes = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          app = {
+              "name": os.environ["APP_DISPLAY"],
+              "bundleIdentifier": os.environ["BUNDLE"],
+              "developerName": repo.split("/")[0],
+              "localizedDescription": f"{os.environ['APP_DISPLAY']}, built from {repo}.",
+              "versions": [{
+                  "version": os.environ.get("version") or "1.0",
+                  "buildVersion": os.environ.get("build") or "1",
+                  "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "localizedDescription": notes,
+                  "downloadURL": url,
+                  "size": size,
+              }],
+          }
+          if icon:
+              app["iconURL"] = icon
+          print(json.dumps({
+              "name": os.environ["APP_DISPLAY"],
+              "identifier": os.environ["BUNDLE"] + ".source",
+              "apps": [app],
+              "news": [],
+          }, indent=2))
+          PY
+          cat xtool/source.json
 
       # Every build of main is also published as the "latest" GitHub Release, so the IPA
       # can be downloaded from a plain link. The title carries the app's version
@@ -128,7 +243,7 @@ jobs:
           } > release-notes.txt
           gh release delete latest --yes --cleanup-tag || true
           sleep 3
-          gh release create latest "xtool/$file.ipa" \
+          gh release create latest "xtool/$file.ipa" xtool/source.json $( [ -f xtool/AppIcon.png ] && echo xtool/AppIcon.png ) \
             --target "$GITHUB_SHA" \
             --title "$title" \
             --notes-file release-notes.txt \

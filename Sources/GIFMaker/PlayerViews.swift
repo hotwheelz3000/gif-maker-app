@@ -9,6 +9,7 @@ struct PlayerLayerView: UIViewRepresentable {
 
     final class PlayerUIView: UIView {
         override static var layerClass: AnyClass { AVPlayerLayer.self }
+        // swiftlint:disable:next force_cast
         var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
     }
 
